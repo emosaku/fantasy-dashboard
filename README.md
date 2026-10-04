@@ -8,7 +8,7 @@ a day; every view is backed by BigQuery history ESPN itself doesn't keep (ESPN's
 UI doesn't retain season-over-season category breakdowns, all-play records, or a
 queryable transaction log).
 
-Five features, once built:
+Six features, once built:
 
 - **Category comparison** — any two teams side by side across all 9 scoring
   categories
@@ -19,9 +19,14 @@ Five features, once built:
 - **Trade and waiver tracking** — a running log of adds, drops, and trades
 - **Roster strength by category** — where each roster is stacked or thin, by
   category
+- **Mock trade analysis** *(added after the original proposal)* — pick two teams
+  and players from each roster to see both sides' category totals before, after,
+  and the delta — model a trade before proposing it for real
 
 This assumes a head-to-head categories league with the standard 9 categories (PTS,
-REB, AST, STL, BLK, 3PM, FG%, FT%, TO).
+REB, AST, STL, BLK, 3PM, FG%, FT%, TO). The full plan, including the original build
+proposal and this feature's design, lives in
+[`docs/proposal.md`](docs/proposal.md).
 
 ## Architecture
 
@@ -36,7 +41,7 @@ Cloud Run Job: espn-ingest  ──reads cookies──  Secret Manager (espn_s2, 
 BigQuery: fantasy dataset (5 raw tables, partitioned/clustered + analytics views)
         │
         ▼
-Cloud Run: Streamlit app (5 pages, cached BigQuery reads)
+Cloud Run: Streamlit app (6 pages, cached BigQuery reads)
         │
         ▼
 League members (one public-but-unlisted link, any device)
@@ -56,8 +61,8 @@ Workload Identity Federation (no JSON keys).
 | 2 | Local data access — prove `espn-api` can pull every dataset the 5 features need | Not started |
 | 3 | BigQuery data model — 5 raw tables (long format, makes/attempts not percentages) | Not started |
 | 4 | Ingest job — containerized Cloud Run Job, staging + `MERGE` for idempotency | Not started |
-| 5 | Analytics layer — BigQuery views (all-play, power rankings, luck, roster strength) | Not started |
-| 6 | Streamlit dashboard — 5 pages, cached queries, phone-friendly | Not started |
+| 5 | Analytics layer — BigQuery views (all-play, power rankings, luck, roster strength, team roster stats) | Not started |
+| 6 | Streamlit dashboard — 6 pages, cached queries, phone-friendly | Not started |
 | 7 | Deploy and share — Cloud Run service, CI/CD, one link for the league | Not started |
 
 ## Current state
@@ -71,7 +76,7 @@ ESPN, nothing touches BigQuery, and nothing is deployed yet.
   `raise NotImplementedError`
 - `sql/ddl/*.sql`, `sql/views/*.sql` — one file per table/view named in the proposal
   (Steps 3 & 5), currently comment-only
-- `app/Home.py`, `app/pages/*.py`, `app/queries.py` — Streamlit entry point, the 5
+- `app/Home.py`, `app/pages/*.py`, `app/queries.py` — Streamlit entry point, the 6
   feature pages, and the page-to-view mapping module (Step 6), currently docstring-only
 - `.github/workflows/deploy-{ingest,app}.yml` — valid but `workflow_dispatch`-only
   (manual trigger), so they can't fire on push before Step 7 actually wires them up
@@ -112,14 +117,14 @@ FantasyDashboard/
 │   └── main.py
 ├── sql/
 │   ├── ddl/                  # Step 3: table definitions (5 raw tables)
-│   └── views/                 # Step 5: analytics views (6 views)
+│   └── views/                 # Step 5: analytics views (7 views)
 ├── app/                        # Step 6: Streamlit dashboard
 │   ├── Home.py
-│   ├── pages/                   # one file per feature (5 pages)
+│   ├── pages/                   # one file per feature (6 pages)
 │   └── queries.py                 # page -> view mapping, no raw SQL in pages
 ├── tests/                          # mirrors ingest/ and app/
 ├── .github/workflows/                # Step 7: CI/CD, manual-trigger stubs for now
-├── docs/                               # design notes
+├── docs/                               # design notes, including proposal.md (the full plan)
 ├── requirements.txt
 ├── requirements-dev.txt
 ├── pyproject.toml                        # ruff + pytest config only (no installable package)

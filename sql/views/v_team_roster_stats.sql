@@ -1,0 +1,4 @@
+-- Step 5 (added): joins each team's current roster to every player's per-game stat
+-- line. Raw per-game averages, deliberately not z-scored like v_roster_strength --
+-- a trade's before/after/delta comparison needs plain numbers, not league-relative
+-- ones. Feeds the Trade Analyzer page.
