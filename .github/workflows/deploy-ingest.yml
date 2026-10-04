@@ -1,0 +1,13 @@
+name: deploy-ingest
+# Step 7: redeploy the espn-ingest Cloud Run Job on pushes to main that touch ingest/,
+# authenticating via Workload Identity Federation (no JSON keys). Manual-only trigger
+# for now so this can't fire before the ingest job actually exists.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  placeholder:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Step 7 not implemented yet"

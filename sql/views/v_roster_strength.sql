@@ -1,0 +1,2 @@
+-- Step 5: sums each roster's per-game player stats (last 15 days); z-scores each
+-- category across the league. Feeds the Roster Strength page.

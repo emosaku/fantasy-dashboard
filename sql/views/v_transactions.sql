@@ -1,0 +1,2 @@
+-- Step 5: latest transactions with team names joined; counts per team.
+-- Feeds the Transactions page.

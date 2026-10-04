@@ -1,0 +1,2 @@
+-- Step 3: transactions table -- grain: one row per action (ADD/DROP/TRADE).
+-- Partitioned on txn_date.

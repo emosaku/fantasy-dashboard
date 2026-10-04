@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment variables -- .env holds the ESPN session cookies (espn_s2, SWID),
+# which grant access to the real ESPN account. Never committed.
+.env
+
+# Testing / tooling caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/

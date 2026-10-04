@@ -1,0 +1,3 @@
+-- Step 5: pivots matchup_categories to one row per team-week; recomputes FG%/FT%
+-- from makes and attempts (never average stored percentages directly). Feeds
+-- the Compare page.

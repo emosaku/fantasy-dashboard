@@ -1,0 +1,6 @@
+espn-api
+pandas
+google-cloud-bigquery
+streamlit
+plotly
+python-dotenv

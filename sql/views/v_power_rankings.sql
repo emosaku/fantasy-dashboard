@@ -1,0 +1,2 @@
+-- Step 5: season totals from v_all_play -- all-play win %, category win %, rank.
+-- Feeds the Power Rankings page.

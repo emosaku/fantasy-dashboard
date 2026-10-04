@@ -1,0 +1,1 @@
+-- Step 3: rosters table -- grain: snapshot_date x team x player. Partitioned on snapshot_date.

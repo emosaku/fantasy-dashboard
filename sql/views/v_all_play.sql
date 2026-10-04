@@ -1,0 +1,3 @@
+-- Step 5: self-joins every team to every other team in the same week; counts
+-- category wins in each simulated matchup. Turnovers is the one category where
+-- lower wins. Feeds v_power_rankings and v_luck.

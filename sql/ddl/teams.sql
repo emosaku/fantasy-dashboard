@@ -1,0 +1,1 @@
+-- Step 3: teams table -- grain: team x snapshot_date. Partitioned on snapshot_date.

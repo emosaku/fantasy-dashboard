@@ -1,0 +1,3 @@
+-- Step 3: matchup_categories table -- grain: matchup_period x team x category.
+-- Clustered on matchup_period, team_id. Long format (one row per category) so
+-- adding a 10th category is a config change, not a schema change.

@@ -1,0 +1,13 @@
+name: deploy-app
+# Step 7: redeploy the Streamlit dashboard as a Cloud Run service on pushes to main
+# that touch app/, authenticating via Workload Identity Federation (no JSON keys).
+# Manual-only trigger for now so this can't fire before the app actually exists.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  placeholder:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Step 7 not implemented yet"

@@ -1,0 +1,2 @@
+-- Step 3: player_stats table -- grain: snapshot_date x player x stat window
+-- (season, last 7, last 15, last 30). Partitioned on snapshot_date.
