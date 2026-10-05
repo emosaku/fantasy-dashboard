@@ -10,6 +10,10 @@ gcloud run services describe fantasy-dash --region us-west1 --project fantasy-da
   --format='value(status.url)'
 ```
 
+A plain-language walkthrough of how the site was created, for anyone in the league:
+[How the league website was built](https://claude.ai/code/artifact/de41d72f-b068-4fb9-ba28-da3f14d43773)
+(a private doc; ask the commissioner for access). This file is the technical record.
+
 ## What was built
 
 ### 1. The image (`Dockerfile` at the repo root)

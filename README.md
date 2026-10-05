@@ -71,7 +71,8 @@ the tests on every push; deploys are a single `gcloud` command each.
 Every step is done: the ingest job, BigQuery tables and views, and the dashboard are
 all live on Google Cloud. The dashboard runs on Cloud Run as `fantasy-dash` (its
 address isn't in this public repo — see [`docs/step7-deploy.md`](docs/step7-deploy.md)),
-works on phones and desktops, and keeps managers signed in for 30 days. It also runs
+works on phones and desktops, and keeps managers signed in for 30 days. How it was
+built, in plain language: [How the league website was built](https://claude.ai/code/artifact/de41d72f-b068-4fb9-ba28-da3f14d43773). It also runs
 locally with `streamlit run app/Home.py` from the repo root.
 
 - `fantasy-dash-emk` is a real GCP project — billing linked, $5/month budget alert,
