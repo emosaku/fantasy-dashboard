@@ -196,8 +196,8 @@ The core of all-play, in SQL:
 
 | View | Feature | Logic |
 |---|---|---|
-| `v_team_week_cats` | Category comparison | Pivot `matchup_categories` to one row per team-week; recompute FG% and FT% from makes and attempts |
-| `v_all_play` | Power rankings, luck | Self-join every team to every other team in the same week; count category wins in each simulated matchup |
+| `v_team_week_cats` | Category comparison | Pivot `matchup_categories` to one row per team-week with the 9 scoring categories; recompute FG%, FT% and 3PT% from makes and attempts |
+| `v_all_play` | Power rankings, luck | Self-join every team to every other team in the same week; decide each simulated matchup on category wins, then roll up to an all-play record per team-week |
 | `v_power_rankings` | Power rankings | Season totals from `v_all_play`: all-play win %, category win %, rank |
 | `v_luck` | Luck analysis | Actual win % minus all-play win %; positive means lucky |
 | `v_transactions` | Trade and waiver tracking | Latest transactions with team names joined; counts per team |
@@ -205,20 +205,23 @@ The core of all-play, in SQL:
 | `v_team_roster_stats` *(added)* | Mock trade analysis | Current roster joined to each player's per-game stat line (raw per-game averages, **not** z-scored — see below for why) |
 
 ```sql
-SELECT a.matchup_period, a.team_id,
-       COUNTIF(
-         (a.category != 'TO' AND a.value > b.value) OR
-         (a.category = 'TO' AND a.value < b.value)
-       ) AS cat_wins
-FROM matchup_categories a
-JOIN matchup_categories b
+-- one row per simulated head-to-head, over the 9 scoring categories
+SELECT a.matchup_period, a.team_id, b.team_id AS opponent_id,
+       COUNTIF(a.value > b.value) AS cat_wins,
+       COUNTIF(a.value < b.value) AS cat_losses
+FROM cats a   -- v_team_week_cats unpivoted to long format
+JOIN cats b
   ON a.matchup_period = b.matchup_period
  AND a.category = b.category
  AND a.team_id != b.team_id
-GROUP BY 1, 2
+GROUP BY 1, 2, 3
 ```
 
-Turnovers are the one category where lower wins. Test every view against a week you
+Each pairing is then a W, L or T on category count, and those roll up into the team's
+weekly all-play record. The league scores 9 categories (FG%, FT%, 3PM, 3PT%, REB, AST,
+STL, BLK, PTS); higher wins in all of them, and there's no turnovers category. The
+attempt-only rows (FGM, FGA, FTM, FTA, 3PA) are never compared directly; they only
+feed the recomputed percentages in `v_team_week_cats`. Test every view against a week you
 can verify by hand on ESPN.
 
 **Why `v_team_roster_stats` isn't z-scored like `v_roster_strength`:** z-scores are
