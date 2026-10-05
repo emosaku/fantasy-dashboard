@@ -1,2 +1,3 @@
-pytest
-ruff
+# Pinned so CI's lint and format checks match local runs exactly.
+pytest==9.1.1
+ruff==0.16.10

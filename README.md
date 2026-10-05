@@ -91,8 +91,10 @@ CI/CD) is next; see [`docs/step7-deploy.md`](docs/step7-deploy.md).
 - `tests/` — 61 tests: the ingest transforms and MERGE statement, the dashboard's math,
   the trade/waiver analyzer (on a synthetic 4-team league), the season projection,
   logins, and the refresh button.
-- `.github/workflows/deploy-{ingest,app}.yml` — valid but `workflow_dispatch`-only
-  until Step 7.
+- `.github/workflows/ci.yml` — lint, formatting and all tests on Python 3.12 on every
+  push and pull request. Library versions are pinned in `requirements*.txt`.
+  `deploy-{ingest,app}.yml` are manual-only stubs; why each Action matters, and
+  which are worth building, is in [`docs/step7-deploy.md`](docs/step7-deploy.md).
 
 ## Setup
 
@@ -149,7 +151,7 @@ FantasyDashboard/
 ├── scripts/manage_logins.py     # create / reset manager logins
 ├── notebooks/                   # Step 2: one-off ESPN API exploration
 ├── tests/                       # mirrors ingest/ and app/; fixtures/ holds the 4-team league
-├── .github/workflows/           # Step 7: CI/CD, manual-trigger stubs for now
+├── .github/workflows/           # ci.yml (tests on every push); deploy stubs for Step 7
 ├── docs/                        # proposal.md (the plan), step4-7 docs, gcp-apis.md,
 │                                  gcp-services.md
 ├── requirements.txt, requirements-dev.txt

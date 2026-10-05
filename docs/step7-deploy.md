@@ -94,23 +94,33 @@ manager login (Step 6). The deployed service needs:
 `dashboard-sa` still can't read the ESPN cookie secrets: the Refresh button starts
 the job, and the job runs as `ingest-sa`.
 
-### 3. CI/CD — the piece deliberately deferred until now
+### 3. GitHub Actions: what each one is for, and what's built
 
-Both `.github/workflows/deploy-{ingest,app}.yml` exist today as `workflow_dispatch`
--only stubs, held back on purpose (discussed earlier in this project) because
-wiring up Workload Identity Federation against code that didn't exist yet would
-have nothing real to verify. That's no longer true — `ingest/` has been live since
-Step 4, and `app/` is now real too. Step 7 is where both workflows get finished for
-real:
+None of these is required for the dashboard to work. Everything they do can be done
+by hand with a few commands, which is how the project has run so far. Each one
+automates a step that's easy to forget or get slightly wrong. They're listed by
+how much they matter here.
 
-- Set up Workload Identity Federation (a federation pool + provider + IAM binding)
-  so GitHub Actions authenticates without a long-lived JSON service account key.
-- `deploy-app.yml` redeploys `fantasy-dash` on pushes to `main` that touch `app/`.
-- `deploy-ingest.yml` redeploys `espn-ingest` on pushes to `main` that touch
-  `ingest/` — this one's overdue regardless of the dashboard: every `ingest/` change
-  so far (about ten deploys in Step 6 alone) was redeployed by hand with
-  `gcloud run jobs deploy`. Keep `--set-env-vars` complete in the workflow; it
-  replaces the job's whole env-var list.
+| Action | What it does | Why it matters | Status |
+|---|---|---|---|
+| **`ci.yml`** — test on every push | On every push and pull request: lint, formatting check, and all tests on Python 3.12 (the version production runs). No Google Cloud access needed. | Catches broken code within about a minute of pushing it, before it's deployed. Before this, tests only ran when someone remembered to, and only on a laptop running Python 3.14 — not the 3.12 production uses. | **Built** |
+| **Pinned library versions** (`requirements*.txt`) — not an Action, but CI depends on it | Every library is fixed to the exact version the tests passed on. | Without pins, every deploy installs whatever is newest that day, so a library release — or a change to the unofficial `espn-api` — could break the daily data pull with no code change on our side. Pinned, the job keeps running on tested versions; upgrading becomes a deliberate change that CI tests first. | **Done** |
+| `deploy-ingest.yml` — auto-deploy the ingest job | On pushes to `main` that change `ingest/`: run the tests, deploy `espn-ingest`, run it once as a check. | The ingest job was redeployed by hand about ten times in Step 6. The deploy command is easy to get subtly wrong — leaving out one `--set-env-vars` setting silently removes it, since the flag replaces the whole list. Worth it if the ingest code keeps changing. | Not built — stub |
+| `deploy-app.yml` — auto-deploy the dashboard | On pushes to `main` that change `app/`: run the tests, deploy the dashboard, check its health endpoint. | Same as ingest, for the website. Only possible after the first manual deploy below. | Not built — stub |
+| `deploy-views.yml` — keep BigQuery views in sync | On pushes that change `sql/views/`: re-create all 12 views in dependency order. | Stops the views in BigQuery drifting from the files in the repo. Views rarely change once built, so this is low priority. | Not planned |
+| Dependabot — weekly update pull requests | Opens a pull request when a pinned library has a new version; CI tests it. | Keeps pins from going stale without surprises. Mostly useful if `espn-api` ever needs a fix for an ESPN change. | Not planned |
+
+**What the deploy workflows would need first** (one-time setup, the bulk of the
+work): enable the STS API; a Workload Identity Federation pool and provider that
+only `emosaku/fantasy-dashboard` on `refs/heads/main` can use (the repo is public, so
+this condition is what stops forks and other branches deploying); a
+`github-deployer` service account with only deploy rights; and two GitHub
+repository variables (the provider and the deployer's email — not secrets). GitHub
+then signs in to Google Cloud without any stored key.
+
+**Never automated:** table schema changes (`ALTER TABLE`, applied by hand before
+pushing code that needs them — they're one-way), manager logins and their secret
+(the passwords must never pass through GitHub), and the ESPN cookies.
 
 ### 4. Custom domain (optional)
 
@@ -129,6 +139,6 @@ not a placeholder, not a localhost demo.
    URL lets a manager sign in, renders every page against real BigQuery data, and
    the Refresh button works (the same "prove it manually first" approach Step 4 used
    before touching Scheduler or CI/CD).
-2. Set up Workload Identity Federation once, then flesh out both
-   `deploy-{ingest,app}.yml` workflows against it.
+2. Optional: if the deploy workflows are wanted, do the one-time Workload Identity
+   Federation setup above, then flesh out the `deploy-{ingest,app}.yml` stubs.
 3. Custom domain only if wanted — it's cosmetic, not blocking.

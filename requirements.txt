@@ -1,7 +1,11 @@
-espn-api
-pandas
-google-cloud-bigquery
-pandas-gbq
-streamlit
-plotly
-python-dotenv
+# Exact versions the test suite passed on (Python 3.12, the version production runs).
+# Pinned so a library release can't change the dashboard or the daily data pull
+# without anyone noticing; bump deliberately and let CI test the new version.
+espn-api==1.0.0
+pandas==3.0.6
+google-cloud-bigquery==3.46.1
+pandas-gbq==0.35.2
+streamlit==1.65.0
+plotly==7.1.0
+python-dotenv==1.2.4
+requests==2.34.2

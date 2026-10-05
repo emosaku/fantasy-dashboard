@@ -1,5 +1,7 @@
-espn-api
-pandas
-pandas-gbq
-google-cloud-bigquery
-requests
+# The ingest job's image only. Same versions as the repo's requirements.txt (keep
+# them in step), minus the dashboard's libraries.
+espn-api==1.0.0
+pandas==3.0.6
+pandas-gbq==0.35.2
+google-cloud-bigquery==3.46.1
+requests==2.34.2

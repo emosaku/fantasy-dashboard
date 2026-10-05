@@ -1,0 +1,43 @@
+name: ci
+# Runs the checks on every push and pull request: lint, format, and the full test
+# suite on Python 3.12 (the version the ingest job and dashboard run in production).
+# Needs no Google Cloud access -- the tests use fakes and fixtures, never BigQuery or
+# ESPN -- so it works for any branch and for pull requests from forks.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install pinned dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check app ingest tests scripts
+
+      - name: Formatting
+        run: ruff format --check app ingest tests scripts
+
+      - name: Tests
+        run: pytest
