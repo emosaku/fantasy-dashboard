@@ -57,31 +57,42 @@ Workload Identity Federation (no JSON keys).
 | Step | Description | Status |
 |---|---|---|
 | 0 | Project scaffolding, tooling, environment | **Complete** |
-| 1 | Prerequisites — GCP project, APIs, service accounts, league ID, ESPN cookies | Not started |
-| 2 | Local data access — prove `espn-api` can pull every dataset the 5 features need | Not started |
-| 3 | BigQuery data model — 5 raw tables (long format, makes/attempts not percentages) | Not started |
-| 4 | Ingest job — containerized Cloud Run Job, staging + `MERGE` for idempotency | Not started |
+| 1 | Prerequisites — GCP project, APIs, service accounts, league ID, ESPN cookies | **Complete** |
+| 2 | Local data access — prove `espn-api` can pull every dataset the 5 features need | **Complete** |
+| 3 | BigQuery data model — 5 raw tables (long format, makes/attempts not percentages) | **Complete** |
+| 4 | Ingest job — containerized Cloud Run Job, staging + `MERGE` for idempotency | **Complete** |
 | 5 | Analytics layer — BigQuery views (all-play, power rankings, luck, roster strength, team roster stats) | Not started |
 | 6 | Streamlit dashboard — 6 pages, cached queries, phone-friendly | Not started |
 | 7 | Deploy and share — Cloud Run service, CI/CD, one link for the league | Not started |
 
 ## Current state
 
-**This is scaffolding only.** The repository layout mirrors the plan above —
-`ingest/`, `sql/{ddl,views}/`, `app/{,pages}/`, `.github/workflows/` — with every file
-a placeholder describing what it will hold and which step builds it. Nothing queries
-ESPN, nothing touches BigQuery, and nothing is deployed yet.
+Steps 1-4 are real and live, not scaffolding: the GCP project, BigQuery tables, and
+the ingest job are all deployed and running. Steps 5-7 (views, dashboard, CI/CD) are
+still scaffolding.
 
-- `ingest/main.py` — Cloud Run Job entry point (Step 4), currently
-  `raise NotImplementedError`
-- `sql/ddl/*.sql`, `sql/views/*.sql` — one file per table/view named in the proposal
-  (Steps 3 & 5), currently comment-only
+- `fantasy-dash-emk` is a real GCP project — billing linked, $5/month budget alert,
+  the 6 required APIs enabled. `ingest-sa`/`dashboard-sa` service accounts exist with
+  least-privilege IAM; `espn-s2`/`espn-swid` live in Secret Manager.
+- The `fantasy` BigQuery dataset has all 5 raw tables (`sql/ddl/*.sql`), populated
+  with real data from the user's live ESPN league.
+- `ingest/` is a real, deployed Cloud Run Job (`espn-ingest`) — pulls all 5 data
+  sources from ESPN and `MERGE`s them into BigQuery. Verified idempotent against the
+  live deployment (same row counts across 3 real executions, including one via Cloud
+  Scheduler). See [`docs/step4-ingest.md`](docs/step4-ingest.md) for the real bugs
+  this surfaced and how they were fixed.
+- Cloud Scheduler (`espn-ingest-daily`, 5 AM `America/Phoenix`) and a Cloud Monitoring
+  alert on job failures are both live.
+- `sql/views/*.sql` — one file per view named in the proposal (Step 5), currently
+  comment-only
 - `app/Home.py`, `app/pages/*.py`, `app/queries.py` — Streamlit entry point, the 6
   feature pages, and the page-to-view mapping module (Step 6), currently docstring-only
 - `.github/workflows/deploy-{ingest,app}.yml` — valid but `workflow_dispatch`-only
-  (manual trigger), so they can't fire on push before Step 7 actually wires them up
-- `tests/` mirrors `ingest/` and `app/` with one placeholder test each, so `pytest`
-  has something to discover
+  (manual trigger), deliberately deferred until Step 7 — no point wiring up CI/CD
+  before the dashboard exists to deploy
+- `tests/ingest/test_transform.py` covers the ingest job's transform logic (home/away
+  unpacking, stat-window selection, transaction flattening); `tests/app/` still has
+  its placeholder, pending Step 6
 
 ## Setup
 
@@ -93,7 +104,7 @@ source .venv/bin/activate
 
 pip install -r requirements.txt -r requirements-dev.txt
 
-cp .env.example .env   # fill in later -- nothing needs real values yet
+cp .env.example .env   # fill in LEAGUE_ID/SEASON/ESPN_S2/SWID/GCP_PROJECT_ID to run ingest locally
 
 pytest
 ```
@@ -107,24 +118,32 @@ pytest
 - `python-dotenv` — local env var loading
 - `pytest`, `ruff` — testing and linting
 - GCP: Cloud Run, Cloud Scheduler, BigQuery, Secret Manager, Artifact Registry, Cloud
-  Build — none provisioned yet (Step 1)
+  Build — all provisioned on `fantasy-dash-emk` (Step 1); see
+  [`docs/gcp-services.md`](docs/gcp-services.md)
 
 ## Project layout
 
 ```
 FantasyDashboard/
-├── ingest/                  # Step 4: Cloud Run Job, ESPN -> BigQuery
-│   └── main.py
+├── ingest/                  # Step 4: Cloud Run Job, ESPN -> BigQuery -- deployed
+│   ├── main.py                # orchestrates the 5 transform+load calls
+│   ├── espn_client.py            # builds the espn_api League from env vars
+│   ├── transform.py                # espn-api objects -> DataFrames matching sql/ddl/
+│   ├── bigquery_load.py              # staging table + MERGE, idempotent load
+│   ├── Dockerfile                      # build context for --source ingest/
+│   └── requirements.txt                  # lean subset for the deployed image
 ├── sql/
-│   ├── ddl/                  # Step 3: table definitions (5 raw tables)
+│   ├── ddl/                  # Step 3: table definitions (5 raw tables) -- live in BigQuery
 │   └── views/                 # Step 5: analytics views (7 views)
 ├── app/                        # Step 6: Streamlit dashboard
 │   ├── Home.py
 │   ├── pages/                   # one file per feature (6 pages)
 │   └── queries.py                 # page -> view mapping, no raw SQL in pages
+├── notebooks/                       # Step 2: one-off ESPN API exploration
 ├── tests/                          # mirrors ingest/ and app/
 ├── .github/workflows/                # Step 7: CI/CD, manual-trigger stubs for now
-├── docs/                               # design notes, including proposal.md (the full plan)
+├── docs/                               # proposal.md (the full plan), gcp-apis.md,
+│                                          gcp-services.md, step4-ingest.md
 ├── requirements.txt
 ├── requirements-dev.txt
 ├── pyproject.toml                        # ruff + pytest config only (no installable package)

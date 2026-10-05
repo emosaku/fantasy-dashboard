@@ -10,6 +10,10 @@
 -- Step 4's ingest transform unpacks each matchup into two rows here, one per side,
 -- each carrying its own team_id/opponent_id.
 --
+-- `result` is nullable: ESPN's real home_stats/away_stats carries attempt-only
+-- categories (FGM, FGA, FTM, FTA, 3PA) that don't win/lose on their own -- only the
+-- derived FG%/FT%/3PT% rows (and the counting categories) have a real W/L/T result.
+--
 -- Natural key for Step 4's MERGE: (season, matchup_period, team_id, category).
 
 CREATE TABLE IF NOT EXISTS `fantasy-dash-emk.fantasy.matchup_categories` (
@@ -17,9 +21,9 @@ CREATE TABLE IF NOT EXISTS `fantasy-dash-emk.fantasy.matchup_categories` (
   matchup_period INT64 NOT NULL,
   team_id INT64 NOT NULL,
   opponent_id INT64 NOT NULL,
-  category STRING NOT NULL,  -- PTS, REB, AST, STL, BLK, 3PM, FGM, FGA, FTM, FTA, TO
+  category STRING NOT NULL,  -- PTS, REB, AST, STL, BLK, 3PM, FGM, FGA, FTM, FTA, TO, FG%, FT%, 3PT%, 3PA
   value FLOAT64 NOT NULL,
-  result STRING NOT NULL,  -- W, L, or T -- TO is the one category where lower wins
+  result STRING,  -- W, L, T, or NULL for attempt-only categories -- TO is the one category where lower wins
   ingested_at TIMESTAMP NOT NULL
 )
 CLUSTER BY matchup_period, team_id;

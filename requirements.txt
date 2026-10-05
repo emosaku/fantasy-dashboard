@@ -1,6 +1,7 @@
 espn-api
 pandas
 google-cloud-bigquery
+pandas-gbq
 streamlit
 plotly
 python-dotenv
