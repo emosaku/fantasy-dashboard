@@ -2,8 +2,11 @@
 
 Step 5's job is to put every bit of real computation — pivots, simulated
 head-to-heads, luck, z-scores — into BigQuery views, so Step 6's dashboard pages
-only ever `SELECT` and plot. All 7 views are written and live in the `fantasy`
-dataset.
+only ever `SELECT` and plot. Step 5 built the first 7 views; Step 6 added 5 more
+(the player and team z-score foundation, category ranks, and player profiles), so
+**12 views** are live in the `fantasy` dataset. Two pieces of analysis deliberately
+live in Python instead (the trade/waiver search and the season projection), because
+they react to page controls; see [Step 6](step6-dashboard.md).
 
 ## The finding that shapes every view here
 
@@ -42,7 +45,18 @@ rosters + player_stats (raw tables)
         ▼
 v_team_roster_stats ──► v_roster_strength
         │
-        └──► (feeds Trade Analyzer page directly)
+        └──► (Trade Analyzer's per-game table)
+
+Added in Step 6:
+
+rosters + free_agents + player_stats
+        │
+        ▼
+v_player_pool ──► v_player_z ──► v_team_category_z ──► v_category_ranks
+                      │                                   (also reads v_team_week_cats,
+                      └──► Trade Analyzer (app/analysis)    league_status for results)
+
+player_details + player_seasons ──► v_player_profile ──► Trade Analyzer's mock trade
 ```
 
 `v_team_week_cats` and `v_team_roster_stats` are the two foundational views —
@@ -82,7 +96,8 @@ Windowed `SUM(...) OVER (PARTITION BY season, team_id ORDER BY matchup_period)`
 over `v_all_play`'s weekly numbers. That one running-total shape serves both of the
 page's visuals without two separate queries: filter to the latest week for the
 ranked table, or keep every week for the rank-over-time line chart. Ranked by
-`RANK()` on all-play win %, with all-play category win % as the tiebreak. Team
+`RANK()` on all-play win % alone — no tiebreak, so teams level on win % share a
+rank (changed in Step 6; it originally broke ties on category win %). Team
 names are joined from each team's *latest* snapshot (via a
 `QUALIFY ROW_NUMBER() ... = 1` dedup pattern reused in three other views below), so
 a mid-season team rename shows the current name retroactively across every week,
@@ -108,12 +123,12 @@ one week happened to be.
 table). **Feeds:** Transactions page.
 
 Mostly a pass-through with two additions. First, ESPN's raw action strings
-(`'FA ADDED'`, `'WAIVER ADDED'`, `'DROPPED'`, `'TRADED'`) are kept verbatim as
-`action` for the activity-log table, and folded into a normalized `action_type`
-(`ADD`/`DROP`/`TRADE`/`OTHER`) for the page's filter dropdown and per-team bar
+(`'FA ADDED'`, `'WAIVER ADDED'`, `'DROPPED'`, `'TRADED'`, and `'MOVED'` for lineup
+moves) are kept verbatim as `action` for the activity log, and folded into a
+normalized `action_type` (`ADD`/`DROP`/`TRADE`/`MOVE`/`OTHER`) for the per-team bar
 chart — `OTHER` is a deliberate catch-all so an action label ESPN adds later
 doesn't silently vanish from the view, it just shows up unfiltered instead of
-breaking. Second, each team's running `team_adds`/`team_drops`/`team_trades`/
+breaking. Second, each team's running `team_adds`/`team_drops`/`team_trades`/`team_moves`/
 `team_txn_count` ride along on every one of that team's rows as window function
 totals (`COUNT(*) OVER (PARTITION BY season, team_id)`), so the page's per-team bar
 chart needs no `GROUP BY` of its own — it reads the count straight off any row.
@@ -152,6 +167,67 @@ special-casing in the z-score math. Players in the `IR` lineup slot are excluded
 they aren't on the active roster contributing stats, so including them would
 overstate a team's real strength.
 
+### Season projection *(added in Step 6; now Python, not a view)*
+
+The Power Rankings page's "Projected finish" started as a view, `v_season_projection`,
+and was replaced by `app/analysis/projection.py` once injuries were factored in: the
+injury assumptions are adjustable on the page, so the projection has to be
+recomputed on every change, which a view can't do. The view was dropped.
+
+- **Finished weeks** (matchup periods before the current one) use the team's real
+  all-play record from `v_all_play`.
+- **Every remaining week**, the current one included, is projected on its own from
+  today's rosters: each player's per-game line (season averages once he has them,
+  ESPN's projection until then), but only in weeks he's expected to be available.
+  Team lines are summed, percentages recomputed from makes/attempts, and teams are
+  compared all-play on the 9 categories.
+- **When an injured player is back:** ESPN's expected return date when it has one
+  (current week + whole weeks until that date); otherwise in the IR slot 4 weeks,
+  Out 2 weeks, day-to-day 1 week (the current one). All three are adjustable.
+- **Final record** = actual + the sum of the projected weeks, ranked by win % with no
+  tiebreak.
+
+The projection still doesn't need games per week: everyone available gets the same
+count, and scaling every team's counting stats by the same factor can't change who
+beats whom. It sums every available rostered player rather than a real starting
+lineup, so it doesn't model a bench player stepping in for an injured starter.
+Covered by `tests/app/test_projection.py`.
+
+### `league_status` — a new raw table *(added in Step 6)*
+
+The season projection needs two facts no other table has: which matchup period is
+current (so earlier ones are finished) and how many regular-season periods there
+are. `matchup_categories` can't tell you either — it includes the current period
+while it's still in progress, and nothing after it. So ingest now writes one row per
+day to `league_status` (`sql/ddl/league_status.sql`): `current_matchup_period`,
+`reg_season_matchup_periods` (ESPN's `settings.reg_season_count` — 16 for this
+league), and `playoff_team_count`. Added via `transform_league_status()` in
+`ingest/transform.py`, with a test; the job was redeployed and run.
+
+### The z-score foundation and category ranks *(added in Step 6)*
+
+Built for the Category Rankings tab and the Trade & Waiver Analyzer; the full
+method is in [proposal.md](proposal.md) ("Category Rankings and the Trade & Waiver
+Analyzer").
+
+- **`v_player_pool`** — every rostered player plus the day's top 100 free agents,
+  joined to their per-game lines for every stat window. `team_id` is NULL for a free
+  agent; `is_ir` flags the IR slot.
+- **`v_player_z`** — each pool player's z-score per category and window. Counting
+  stats: `(x - mean) / sd`. FG%/FT%/3PT%: volume-weighted, `(player % - league %) x
+  attempts`, then z of that. Plus a **blended** window: season and projected z mixed
+  by games played, `alpha = min(GP / 20, 1)`. Checked: mean 0 and SD 1 in every
+  category; Tatum's high-volume, low-percentage shooting comes out negative.
+- **`v_team_category_z`** — each team's strength per category: its non-IR players'
+  z summed. The analyzer's own Python totals match it exactly.
+- **`v_category_ranks`** — every team ranked 1-14 per category in two lenses:
+  `roster` (team z per window) and `results` (finished weeks: average weekly totals,
+  percentages from total makes over attempts, and an all-play win rate). Ties share a
+  rank; `gap_above`/`gap_below` give the distance to the next team either way.
+- **`v_player_profile`** — per pool player: ESPN's injured flag, status, return date
+  and season outlook, plus average games played over the last 3 seasons he was in
+  the NBA and each season's count.
+
 ## Patterns reused across views
 
 - **Latest-snapshot dedup**: `teams` and `rosters` both accumulate a new row per
@@ -188,13 +264,14 @@ dataset (not just checked for valid syntax) and queried for sane output:
   in-season results — e.g. real per-game point projections and real positive/
   negative `pts_z` values spread across teams, proving the join and z-score math
   work correctly end to end even before the season starts.
-- `v_transactions`: shows the one real transaction in the league so far (the
-  user's own team dropping Russell Westbrook), with `action_type = 'DROP'` and
-  `team_drops = 1` correctly computed.
+- `v_transactions`: when built, it showed the one real transaction in the league
+  (team 10 dropping Russell Westbrook), with `action_type = 'DROP'` and
+  `team_drops = 1`. Now it holds every activity, lineup moves included (27 as of
+  Oct 5).
 
 ## Done when
 
-All 7 views exist in BigQuery, each returns rows that match hand-checkable
+All 12 views exist in BigQuery, each returns rows that match hand-checkable
 expectations for the league's current (pre-season) state, and none of them
 duplicate computation that another view in the chain already did. All of that
 holds today — Step 5 is complete. The real test still ahead is re-verifying

@@ -1,6 +1,7 @@
 -- Step 3: player_stats table -- grain: snapshot_date x player x stat window.
 --
--- One row per player per window per day. `stat_window` is one of 'season', 'last_7',
+-- One row per player per window per day, for every rostered player plus the day's
+-- top free agents (added in Step 6, for the waiver analyzer). `stat_window` is one of 'season', 'last_7',
 -- 'last_15', 'last_30', or 'projected' (named stat_window, not window -- WINDOW is a
 -- reserved keyword in BigQuery SQL, used for window functions). Values are per-game
 -- averages, not season totals, so windows of different lengths compare directly.
@@ -30,6 +31,7 @@ CREATE TABLE IF NOT EXISTS `fantasy-dash-emk.fantasy.player_stats` (
   ftm FLOAT64,
   fta FLOAT64,
   turnovers FLOAT64,
+  gp FLOAT64,  -- added in Step 6: games in the window; blends season stats with projections
   ingested_at TIMESTAMP NOT NULL
 )
 PARTITION BY snapshot_date

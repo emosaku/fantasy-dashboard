@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS `fantasy-dash-emk.fantasy.rosters` (
   position STRING,
   lineup_slot STRING,
   injury_status STRING,
+  expected_return_date DATE,  -- added in Step 6: ESPN's estimate, often NULL; feeds the
+                              -- injury-aware season projection
   ingested_at TIMESTAMP NOT NULL
 )
 PARTITION BY snapshot_date

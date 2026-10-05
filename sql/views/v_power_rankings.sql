@@ -4,9 +4,9 @@
 -- Grain: team x matchup_period, where every number is season-to-date *through* that
 -- week. That one shape serves both of the page's visuals: filter to one week for the
 -- ranked table (the latest week is the season total), or keep every week for the
--- rank-over-time line chart. Ranked on all-play win %, then all-play category
--- win % as the tiebreak. Team names come from each team's latest snapshot, so a
--- renamed team shows its current name across every week.
+-- rank-over-time line chart. Ranked on all-play win % alone: teams level on it
+-- share a rank (no tiebreak). Team names come from each team's latest snapshot, so
+-- a renamed team shows its current name across every week.
 
 CREATE OR REPLACE VIEW `fantasy-dash-emk.fantasy.v_power_rankings` AS
 WITH latest_teams AS (
@@ -47,7 +47,7 @@ SELECT
   t.team_name,
   RANK() OVER (
     PARTITION BY p.season, p.matchup_period
-    ORDER BY p.ap_win_pct DESC, p.ap_cat_win_pct DESC
+    ORDER BY p.ap_win_pct DESC
   ) AS power_rank,
   p.ap_wins,
   p.ap_losses,

@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
+import login
 import queries
 import ui
 from categories import CATEGORIES, COLUMNS, LABELS, fmt
@@ -24,7 +25,10 @@ team_ids = sorted(weeks["team_id"].unique(), key=lambda t: names.get(t, ""))
 week_options = ["Season", *sorted(weeks["matchup_period"].unique(), reverse=True)]
 
 c1, c2, c3 = st.columns([2, 2, 1])
-a = c1.selectbox("Team", team_ids, index=0, format_func=names.get)
+mine = login.my_team()
+a = c1.selectbox(
+    "Team", team_ids, index=team_ids.index(mine) if mine in team_ids else 0, format_func=names.get
+)
 b = c2.selectbox("Against", [t for t in team_ids if t != a], index=0, format_func=names.get)
 period = c3.selectbox(
     "Period", week_options, format_func=lambda w: w if w == "Season" else f"Week {w}"

@@ -17,62 +17,65 @@ resources built on top of them.
 | Resource | Use case | Status |
 |---|---|---|
 | **`ingest-sa`** service account | Identity for the daily ingest job. Holds *only* what it needs to pull ESPN data in and write it to BigQuery: BigQuery Data Editor, BigQuery Job User, Secret Manager Secret Accessor. | Created |
-| **`dashboard-sa`** service account | Identity for the Streamlit app. Holds *only* read access: BigQuery Data Viewer, BigQuery Job User. Deliberately can't touch Secret Manager — the dashboard never needs ESPN credentials, so it's structurally incapable of leaking them even if compromised. | Created |
+| **`dashboard-sa`** service account | Identity for the Streamlit app. Today: BigQuery Data Viewer, BigQuery Job User. Step 7 adds exactly two narrow grants: `roles/run.invoker` on the `espn-ingest` job only (the Refresh data button), and Secret Accessor on the login-hash secret only. It still can't read the ESPN cookie secrets, so it's structurally incapable of leaking them even if compromised. | Created; Step 7 grants pending |
 
 This two-identity split is the project's core security boundary: the ESPN session
 cookies are reachable from exactly one place (the ingest job), and the
-internet-facing half (the dashboard, `--allow-unauthenticated`) can't reach them at
-all.
+internet-facing half (the dashboard) can't reach them at all. The Refresh button can
+*start* the ingest job, but the job runs as `ingest-sa`, so the dashboard still never
+sees the cookies.
 
 ## Secrets
 
 | Resource | Use case | Status |
 |---|---|---|
-| **Secret Manager** (`espn-s2`, `espn-swid`) | Stores the two ESPN session cookies outside of git and outside of plain env vars. Cloud Run injects them into the ingest job at runtime via `--set-secrets`; they're never baked into the container image or committed to the repo. | Created (2 secret versions) |
+| **Secret Manager** (`espn-s2`, `espn-swid`) | Stores the two ESPN session cookies outside of git and outside of plain env vars. Cloud Run injects them into the ingest job at runtime via `--set-secrets`; they're never baked into the container image or committed to the repo. | Created |
+| **Secret Manager** (dashboard login hashes) | The manager logins' salted password hashes (`.streamlit/secrets.toml`, written by `scripts/manage_logins.py`), mounted into the dashboard service as a file. | Step 7 |
 
 ## Data storage
 
 | Resource | Use case | Status |
 |---|---|---|
-| **BigQuery dataset** `fantasy` (region `us-west1`) | The project's database. Holds the five raw tables (`teams`, `matchup_categories`, `rosters`, `player_stats`, `transactions`) and every analytics view that powers the six dashboard pages. Region matches Cloud Run's region to avoid cross-region query costs. | Dataset created, empty — tables are Step 3 |
-| **BigQuery views** (`v_team_week_cats`, `v_all_play`, `v_power_rankings`, `v_luck`, `v_transactions`, `v_roster_strength`, `v_team_roster_stats`) | Where the actual analysis logic lives — all-play simulation, luck calculation, z-scored roster strength, etc. — so Streamlit pages only `SELECT` and plot, never compute. | Not started (Step 5) |
+| **BigQuery dataset** `fantasy` (region `us-west1`) | The project's database: 9 raw tables (`teams`, `matchup_categories`, `rosters`, `player_stats`, `transactions`, `free_agents`, `league_status`, `player_seasons`, `player_details`), each filled by the ingest job. Region matches Cloud Run's region to avoid cross-region query costs. | Live, filled daily |
+| **BigQuery views** (`v_team_week_cats`, `v_all_play`, `v_power_rankings`, `v_luck`, `v_transactions`, `v_team_roster_stats`, `v_roster_strength`, `v_player_pool`, `v_player_z`, `v_team_category_z`, `v_category_ranks`, `v_player_profile`) | Where the set-based analysis lives — all-play, luck, player and team z-scores, category ranks — so Streamlit pages mostly `SELECT` and plot. The trade/waiver search and the season projection run in tested Python (`app/analysis/`) because they react to page controls. | Live (12 views) |
 
 ## Compute
 
 | Resource | Use case | Status |
 |---|---|---|
-| **Cloud Run Job** `espn-ingest` | Runs once a day: builds an `espn-api` `League` object using the Secret Manager cookies, pulls all five data sources, and `MERGE`s them into BigQuery. Billed only for the seconds it actually runs — $0 the rest of the day. | Not started (Step 4) |
-| **Cloud Run Service** (Streamlit dashboard) | Serves the 6-page dashboard to the league over one public-but-unlisted URL. `--min-instances 0` means it scales to zero between visits — no idle cost, just a short cold start on the next view. `--session-affinity` keeps each viewer pinned to one instance for Streamlit's websocket connection. | Not started (Step 7) |
+| **Cloud Run Job** `espn-ingest` | Runs once a day (and on demand from the dashboard's Refresh data button): pulls the league from ESPN using the Secret Manager cookies — teams, matchups, rosters, per-game stats, free agents, every activity, injury details and 3 seasons of games played — and `MERGE`s it into BigQuery. About a minute per run; billed only for those seconds. | Live |
+| **Cloud Run Service** (Streamlit dashboard) | Serves the dashboard to the league over one URL; every page sits behind a manager login. `--min-instances 0` means it scales to zero between visits — no idle cost, just a short cold start on the next view. `--session-affinity` keeps each viewer pinned to one instance for Streamlit's websocket connection. | Not started (Step 7) |
 
 ## Scheduling
 
 | Resource | Use case | Status |
 |---|---|---|
-| **Cloud Scheduler** job | Triggers `espn-ingest` automatically every day at 5:00 AM Arizona time (after that night's games have settled), so nobody has to remember to run it by hand. Falls inside the free tier (3 jobs/month free; this project needs 1). | Not started (Step 4) |
+| **Cloud Scheduler** job `espn-ingest-daily` | Triggers `espn-ingest` automatically every day at 5:00 AM Arizona time (after that night's games have settled), so nobody has to remember to run it by hand. Falls inside the free tier (3 jobs/month free; this project needs 1). | Live |
 
 ## Build and artifacts
 
 | Resource | Use case | Status |
 |---|---|---|
-| **Cloud Build** | Builds the Docker images for both the ingest job and the dashboard directly from source — what `gcloud run jobs deploy --source` and `gcloud run deploy --source` do under the hood, no local Docker build required. | Used implicitly whenever Step 4/7's deploy commands run |
+| **Cloud Build** | Builds the Docker images for both the ingest job and the dashboard directly from source — what `gcloud run jobs deploy --source` and `gcloud run deploy --source` do under the hood, no local Docker build required. | Used on every ingest deploy; the dashboard's in Step 7 |
 | **Artifact Registry** | Stores those built images between deploys. | Used implicitly, same as above |
 
 ## Observability
 
 | Resource | Use case | Status |
 |---|---|---|
-| **Cloud Monitoring alert** on job failures | If ESPN returns a 401 (expired cookies) or the job otherwise fails, this is what notifies you to refresh the secret — without it, a silent ingest failure just means stale data with no warning. | Not started (Step 4) |
+| **Cloud Monitoring alert** on job failures | If ESPN returns a 401 (expired cookies) or the job otherwise fails, this is what notifies you to refresh the secret — without it, a silent ingest failure just means stale data with no warning. | Live |
 
 ## CI/CD (deliberately deferred)
 
 | Resource | Use case | Status |
 |---|---|---|
-| **Workload Identity Federation** + **GitHub Actions** | Lets GitHub Actions deploy to Cloud Run on push to `main` without a long-lived JSON service account key sitting in repo secrets. | Deliberately not set up yet — nothing deployable exists to test it against. Planned for right before Step 7's deploy, once `ingest/main.py` and the dashboard are real code instead of `NotImplementedError` stubs. |
+| **Workload Identity Federation** + **GitHub Actions** | Lets GitHub Actions deploy to Cloud Run on push to `main` without a long-lived JSON service account key sitting in repo secrets. | Not set up yet — part of Step 7. The workflows exist as manual-trigger stubs. |
 
 ## Cost summary
 
-Every piece above that's actually built right now (project, budget, 2 service
-accounts, 2 secrets, empty dataset) costs **$0/month**. Once the rest is built, the
+Everything built so far (project, budget, service accounts, secrets, a season's
+worth of BigQuery data, a daily one-minute Cloud Run Job, one Scheduler job) costs
+**effectively $0/month** — all within free tiers. Once the dashboard is deployed, the
 architecture is designed to stay near-zero at idle too: Cloud Run scales to zero,
 Cloud Scheduler and Secret Manager both fit their free tiers at this scale, and a
 season of league data is well under BigQuery's free storage tier. See the proposal's

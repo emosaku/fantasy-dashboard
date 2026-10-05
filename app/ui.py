@@ -13,6 +13,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 import queries
+import refresh
 
 LIGHT = {
     "series": ["#2a78d6", "#eb6834", "#1baf7a"],
@@ -71,9 +72,33 @@ def show(fig: go.Figure) -> None:
 
 
 def sidebar_freshness() -> None:
+    """'Data updated ...' plus a Refresh data button, on every page. Data refreshes on
+    its own every morning; the button pulls from ESPN on demand (e.g. after a trade)."""
     ts = queries.last_updated()
     if ts is None:
         st.sidebar.caption("No data loaded yet.")
-        return
-    local = ts.tz_convert(LEAGUE_TZ)
-    st.sidebar.caption(f"Data updated {local:%b %-d, %-I:%M %p} Arizona time")
+    else:
+        local = ts.tz_convert(LEAGUE_TZ)
+        st.sidebar.caption(f"Data updated {local:%b %-d, %-I:%M %p} Arizona time")
+
+    ready = refresh.can_refresh(ts)
+    clicked = st.sidebar.button(
+        "Refresh data",
+        icon=":material/refresh:",
+        disabled=not ready,
+        help="Pull the latest from ESPN now (about a minute). Also runs on its own "
+        "every morning at 5 AM Arizona time."
+        if ready
+        else "Just updated. Available again 10 minutes after the last update.",
+    )
+    if clicked:
+        with st.sidebar.status("Pulling the latest from ESPN...") as status:
+            try:
+                refresh.run_ingest()
+            except Exception as error:  # surface any failure in the sidebar, not a traceback
+                status.update(label="Refresh failed", state="error")
+                st.sidebar.error(str(error))
+                return
+            status.update(label="Updated", state="complete")
+        st.cache_data.clear()  # drop the hour-long query cache so pages re-read
+        st.rerun()

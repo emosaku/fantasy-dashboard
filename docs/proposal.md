@@ -3,9 +3,10 @@
 This is the living Markdown version of the original build proposal PDF, kept in
 version control so the plan can evolve with the project rather than staying frozen as
 a static document. Where this diverges from the original PDF, it's marked explicitly
-— see **Mock Trade Analysis** below, a feature added after the original proposal
-(promoted out of that document's own stretch-goals list, with real UX detail the
-original one-liner didn't have).
+*(added after the original proposal)*: **Mock Trade Analysis**, **Category Rankings
+and the Trade & Waiver Analyzer**, and the **later additions** (manager logins, an
+injury-aware season projection, the full activity log, an on-demand refresh, and
+player health and games-played history) — each with its own section below.
 
 ## Overview and goals
 
@@ -26,10 +27,15 @@ The dashboard ships six features:
 - **Roster strength by category** — where each roster is stacked or thin
 - **Mock trade analysis** *(added after the original proposal)* — model the category
   impact of a hypothetical trade between two teams before proposing it for real
+- **Category rankings and a trade & waiver analyzer** *(added)* — every team ranked
+  in every category, and waiver pickups and win-win trades recommended per team
+- **Manager logins, a projected finish, the full activity log, on-demand refresh**
+  *(added)* — see "Later additions" below
 
-This plan assumes a head-to-head categories league with the standard 9 categories
-(PTS, REB, AST, STL, BLK, 3PM, FG%, FT%, TO). A points league changes Steps 3 and 5
-but nothing else.
+The original plan assumed the standard 9 categories with turnovers. The real league
+(confirmed in Step 2) is 14 teams, head-to-head **Most Categories**, scoring FG%, FT%,
+3PM, **3PT%**, REB, AST, STL, BLK, PTS — no turnovers — over a 16-week regular season.
+Everything built follows the real league.
 
 ## Architecture
 
@@ -45,17 +51,18 @@ Cloud Run Job: espn-ingest  ──reads cookies──  Secret Manager (espn_s2, 
         │  pulls league data via the unofficial ESPN Fantasy API (espn-api)
         │  MERGEs into BigQuery
         ▼
-BigQuery: fantasy dataset (5 raw tables + analytics views)
+BigQuery: fantasy dataset (raw tables + analytics views; 9 and 12 as built)
         │
         ▼
-Cloud Run: Streamlit app (6 pages, cached queries)
+Cloud Run: Streamlit app (cached queries, manager logins)
         │
         ▼
-League members (one public link, any device)
+League managers (one link, any device, each with a login)
 ```
 
 GitHub Actions deploys both Cloud Run services on push to `main`. Credentials never
-leave the ingest side; the dashboard's service account can only read BigQuery.
+leave the ingest side; the dashboard's service account reads BigQuery and (for the
+Refresh data button) may start the ingest job, which still runs as `ingest-sa`.
 
 ## Step 1: Prerequisites (about 2 hours)
 
@@ -149,7 +156,9 @@ Two design choices matter:
 Keep the DDL in `sql/ddl/` so the schema lives in version control.
 
 No new tables for mock trade analysis — see the feature design below, which reuses
-`rosters` and `player_stats` as-is.
+`rosters` and `player_stats` as-is. Later features added four tables (`free_agents`,
+`league_status`, `player_seasons`, `player_details`) and a few columns; see
+[step4-ingest.md](step4-ingest.md).
 
 ## Step 4: Ingest job (about 6 hours)
 
@@ -301,10 +310,83 @@ players out, recompute each roster's totals and averages) happens in the Streaml
 app itself, recalculated live as the selection changes. This is a deliberate,
 named departure from the rest of the app's architecture, not an oversight.
 
-**No persisted "your team":** like every other control in this app, team pickers
-reset each session — there's no login and no per-user state (the whole dashboard is
-one shared, unauthenticated link), so "your team" is just whichever team you
-pick, same as any other page's filters.
+**"Your team" comes from the login** *(changed after manager logins were added)*:
+the original design had no login, so "your team" was whichever team you picked. Now
+each manager signs in, their team is the default, and the Trade Analyzer is locked
+to it (the commissioner can pick any team). As built, players are picked with
+dropdowns and every waiver or trade recommendation can be loaded into the mock trade.
+
+### Feature design: Category Rankings and the Trade & Waiver Analyzer *(added after the original proposal)*
+
+Two features built on one shared foundation: every player's z-score in each of the
+9 categories. They extend Roster Strength and the Mock Trade Analysis above rather
+than replacing them.
+
+**Foundation.** The player pool is every rostered player plus the top 100 free
+agents ESPN lists that day (a new `free_agents` table, with their stat lines in
+`player_stats`). Counting categories use `(x - mean) / sd` of per-game averages.
+FG%, FT% and 3PT% are volume-weighted: `impact = (player % - league %) x attempts`,
+then z of impact. A **Blended** window mixes season and projected z by games played,
+`alpha = min(GP / 20, 1)` (a new `player_stats.gp` column). A team's strength in a
+category is the sum of its non-IR players' z. Views: `v_player_pool`, `v_player_z`,
+`v_team_category_z`, `v_category_ranks`.
+
+**Category Rankings** (a tab on the Roster Strength page): every team ranked 1-14 in
+every category plus an average rank, in two lenses -- *Roster strength* (team z
+totals per stat window; works before games start) and *Results* (finished weeks:
+average weekly totals, percentages from total makes over attempts, plus an
+all-play win rate per category; empty until week 1 finishes). The highlighted team
+(the signed-in manager's team by default) is outlined and shows its tiers; a category detail chart shows
+the gaps that ranks hide.
+
+**Trade & Waiver Analyzer** (the Trade Analyzer page), four tabs:
+
+- *Team profile:* rank, team z, gaps, weight and tier per category, plus the team's
+  E and all-play matchup record.
+- *Waiver wire:* every add/drop pair, ranked by change in E.
+- *Trade finder:* every 1-for-1 and 2-for-1 deal with every team, keeping only
+  win-win deals (my E up, theirs not down), with a Lopsided flag (general value
+  given vs received differs by more than 1.5 z, hidden by default), top targets and
+  trade chips.
+- *Mock trade:* the simulator above, now with ranks, tiers, E and record before and
+  after for both teams; any recommendation loads into it with matching numbers.
+
+Key definitions: a category's **weight** for a team is how many opponents a change
+of delta (default 1.0 z) would flip, `(U + 0.5 D) / (N - 1)`, scaled to average 1.
+**Tiers:** Lock = top 3 with nobody within delta behind; Punt = bottom 3 with nobody
+within delta ahead (weight 0); Swing = the rest; the user can override any of them
+for the session. **E** = categories won against every other team (ties half,
+punted categories excluded), max 9 x 13 = 117. Every recommendation is verified by
+recomputing team totals with the move applied, and explained in plain text counted
+from the per-category change ("+2 category wins: passes 2 teams in BLK, 1 in FG%;
+costs 1 team in 3PM").
+
+Adapted to this league: it scores 3PT% rather than turnovers, so no category needs a
+sign flip; it has 14 teams, not 12. One rule added beyond the original spec: in a
+2-for-1, the side left a player short picks up the best available free agent for
+the open spot, so both rosters stay full and 2-for-1s aren't a free upgrade for
+whoever receives two players. The math lives in a tested package, `app/analysis/`.
+
+### Later additions *(added after the original proposal)*
+
+- **Manager logins.** Every page sits behind a login; each of the 14 managers has a
+  username and a random password from `scripts/manage_logins.py`. Only salted scrypt
+  hashes are stored (`.streamlit/secrets.toml`, git-ignored); 5 wrong passwords lock
+  a username for 15 minutes. A manager's team is the default everywhere and the
+  Trade Analyzer is locked to it, so everyone gets recommendations for their own team.
+- **Projected finish** on Power Rankings: actual all-play results for finished weeks
+  plus each remaining week projected from today's rosters, leaving injured players
+  out of the weeks they're expected to miss (ESPN's return date, else 4 weeks for
+  IR, 2 for Out, 1 for day-to-day — all adjustable). Python, not a view, because the
+  assumptions change on the page (`app/analysis/projection.py`).
+- **Full activity log.** Ingest reads every page of ESPN's activity feed, lineup
+  moves included, with player ids; the Transactions page filters on every column.
+- **Refresh data** button: runs the ingest job on demand alongside the daily
+  schedule, with a 10-minute cooldown.
+- **Player health and durability.** Ingest stores ESPN's injury status, return date
+  and season outlook, and games played in each of the last 3 seasons; the mock trade
+  shows them for every player in the deal.
+- **Managers' real names** instead of ESPN usernames.
 
 ## Step 7: Deploy and share (about 4 hours)
 
@@ -321,10 +403,12 @@ gcloud run deploy fantasy-dash \
 - The Dockerfile runs `streamlit run Home.py --server.port=$PORT
   --server.address=0.0.0.0`. Cloud Run supports the websockets Streamlit uses;
   session affinity keeps each viewer on one instance.
-- **Access:** `--allow-unauthenticated` makes the link public but unlisted. The
-  dashboard holds no ESPN credentials, only league stats, so that's usually fine. If
-  you want it locked down, add a simple shared password via `st.secrets`, or put
-  Identity-Aware Proxy in front.
+- **Access:** `--allow-unauthenticated` lets the link reach the app; the app itself
+  requires a manager login on every page. The login hashes (`secrets.toml`) go in
+  Secret Manager and are mounted into the service. The dashboard holds no ESPN
+  credentials.
+- **Refresh button:** `dashboard-sa` needs `roles/run.invoker` on the `espn-ingest`
+  job (and only that job).
 - **CI/CD:** a GitHub Actions workflow authenticates with Workload Identity
   Federation (no JSON keys) and redeploys the app on pushes to `main` that touch
   `app/`, and the job on pushes that touch `ingest/`.
@@ -356,5 +440,6 @@ tiers at league scale. The budget alert from Step 1 is the backstop.
 ## Stretch goals
 
 Once the core ships (now including mock trade analysis, promoted out of this list):
-a dbt project for the views, playoff odds via Monte Carlo simulation, and a weekly
-recap posted to the league's group chat.
+a dbt project for the views, playoff odds via Monte Carlo simulation (the projected
+finish is a deterministic first step toward it), and a weekly recap posted to the
+league's group chat.

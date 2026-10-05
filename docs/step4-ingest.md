@@ -1,9 +1,14 @@
 # Step 4: Ingest job
 
-Step 3 built the five empty BigQuery tables. Step 4 is what fills them — a
+Step 3 built the empty BigQuery tables. Step 4 is what fills them — a
 containerized Python job that pulls the league from ESPN and loads it into
 BigQuery on a schedule. This is the one piece of the whole project that actually
 talks to ESPN; everything downstream (views, dashboard) only ever reads BigQuery.
+
+The job started with five tables. Step 6's features added four more (`free_agents`,
+`league_status`, `player_seasons`, `player_details`), a few columns, and a direct
+read of ESPN's activity feed; this doc describes the job as it runs now, and
+[What Step 6 added](#what-step-6-added) lists those changes.
 
 ## What already exists for this step
 
@@ -17,8 +22,7 @@ talks to ESPN; everything downstream (views, dashboard) only ever reads BigQuery
   against the live league (Step 2); Step 4's transform logic is built directly on
   what that script found, not on the library's docs
 
-What's missing is the actual job: `ingest/main.py` still just
-`raise NotImplementedError`.
+At the start of Step 4, `ingest/main.py` was still a `raise NotImplementedError` stub.
 
 ## The job, end to end
 
@@ -28,11 +32,15 @@ Cloud Scheduler (5:00 AM AZ, daily)
         ▼
 Cloud Run Job: espn-ingest
         │ 1. reads ESPN_S2/SWID from Secret Manager (injected as env vars)
-        │ 2. builds espn_api.basketball.League
-        │ 3. pulls 5 sources, transforms each to a DataFrame
+        │ 2. builds espn_api.basketball.League; reads ESPN's raw activity and
+        │    player-info feeds where espn_api drops fields
+        │ 3. transforms each source to a DataFrame
         │ 4. loads each into a staging table, then MERGEs into the real table
         ▼
-BigQuery: fantasy.{teams, matchup_categories, rosters, player_stats, transactions}
+BigQuery: fantasy.{teams, matchup_categories, rosters, player_stats, transactions,
+                   free_agents, league_status, player_seasons, player_details}
+
+Also triggered on demand by the dashboard's Refresh data button (Step 6).
 ```
 
 ## Transform logic per table
@@ -43,6 +51,8 @@ actual (not documented) shape into the flat rows each table expects.
 ### `teams`
 Straightforward — one row per team per ingest run. `league.teams` already gives
 `team_id`, `team_name`, `wins`, `losses`, `standing` directly as flat attributes.
+`owner` is the manager's real first and last name (what ESPN's site shows), falling
+back to the ESPN username only when the account has no name.
 
 ### `matchup_categories`
 **Not straightforward.** `league.box_scores(matchup_period=N)` returns one object
@@ -55,7 +65,8 @@ side, each getting its own `team_id`/`opponent_id`. Loop over every category in
 ### `rosters`
 `team.roster` is a flat list of `Player` objects — straightforward. One row per
 player per team per run, pulling `player_id`, `player_name` (`.name`),
-`position` (`.position`), `lineup_slot`, `injury_status` directly.
+`position` (`.position`), `lineup_slot`, `injury_status` and ESPN's
+`expected_return_date` (usually empty) directly.
 
 ### `player_stats`
 **The trickiest source.** `Player.stats` is a dict keyed by window
@@ -68,20 +79,37 @@ now because the season hasn't started. The transform:
    from ESPN's `_total`/`_last_N`/`_projected` keys)
 2. Pulls the per-category numbers from the nested `avg` sub-dict (per-game
    averages, so windows of different lengths stay comparable)
-3. Writes a row even when a window's numbers are all zero (that's real information —
-   it means no games have been played in that window yet) **except** it always
-   includes `'projected'`, since that's the one window with real non-zero numbers
-   before the season starts
+3. Skips a window ESPN hasn't filled in yet (no `avg` block), which before the
+   season means everything but `'projected'`
+
+It covers every rostered player **and** the day's top 100 free agents, and stores
+`fg3a` (3PT% is a scoring category) and `gp` (games played in the window, used to
+blend season stats with projections) alongside the categories.
 
 ### `transactions`
-`league.recent_activity(size=N)` returns one entry per timestamp, and each entry's
-`actions` field is a **list** of `(team, action_string, player_name, _)` tuples — a
-single trade can bundle several player moves under one timestamp. The transform
-flattens this: one output row per tuple, not per `recent_activity()` entry. Since
-ESPN provides no stable transaction id, `txn_id` is synthesized as a deterministic
-hash of `(txn_date, team_id, action, player_id)` — deterministic so re-running
-ingest produces the same `txn_id` for the same action, which is what makes the
-`MERGE` idempotent for this table specifically.
+Every activity this season — free-agent and waiver adds, drops, trades, and lineup
+moves — read straight from ESPN's league communication feed (`fetch_activity`), not
+through `league.recent_activity()`. espn_api throws away two things the raw messages
+carry: the team on a lineup move and the player id on every action. Each activity
+topic can bundle several messages (a trade's legs), so the transform writes one row
+per message. The feed is read page by page (50 at a time, by offset) until a short
+page comes back, so a busy day can never push activity out of reach.
+
+Since ESPN provides no stable transaction id, `txn_id` is a deterministic hash of
+`(date, team_id, action, player_name)` — the same recipe from day one, so rows loaded
+before the switch still match — which is what makes the `MERGE` idempotent here.
+Lineup moves also store `detail`, the slots moved between (`BE to UT`).
+
+### `free_agents`, `league_status`, `player_details`, `player_seasons`
+- `free_agents`: `league.free_agents(size=100)` — the waiver pool the Trade Analyzer
+  recommends from and part of the z-score player pool.
+- `league_status`: one row per run — current matchup period and the number of
+  regular-season periods (16), which the season projection needs.
+- `player_details`: for every pool player, ESPN's injured flag, injury status, return
+  date and written season outlook, from the `kona_player_info` view.
+- `player_seasons`: games played in each of the last 3 completed seasons, from the
+  same view requested against each past season's league endpoint
+  (`fetch_player_info`). A season with no NBA line for the player gets no row.
 
 ## Idempotency: staging table + MERGE
 
@@ -93,6 +121,12 @@ because Cloud Scheduler fires twice) never duplicates rows:
    (documented in each `sql/ddl/*.sql` file's header comment)
 3. On match: update the row (handles corrections, e.g. a late stat update). On no
    match: insert.
+4. Tables keyed by `snapshot_date` (`teams`, `rosters`, `player_stats`, `free_agents`,
+   `league_status`, `player_details`) hold one complete picture per day, so the
+   `MERGE` also deletes that day's rows the run no longer has
+   (`WHEN NOT MATCHED BY SOURCE AND T.snapshot_date = <today> THEN DELETE`). Without
+   it, a player dropped between two same-day runs kept his old roster row until the
+   next day. An empty pull never deletes anything.
 
 ```sql
 MERGE fantasy.matchup_categories T
@@ -132,7 +166,7 @@ read from `.env` (that file only exists for local development).
 
 ## Done when
 
-A manual `gcloud run jobs execute espn-ingest` fills all five tables, and running it
+A manual `gcloud run jobs execute espn-ingest` fills every table, and running it
 a second time right after changes no row counts — proof the `MERGE` idempotency
 actually holds, not just that the job runs without error.
 
@@ -178,3 +212,38 @@ third time via the actual Cloud Scheduler trigger, left row counts at exactly
   `run.googleapis.com/job/completed_execution_count` (filtered to `result="failed"`
   for this job) emails a notification channel on any failed execution, per the
   "fail loudly" principle above.
+
+## What Step 6 added
+
+The dashboard's later features needed more from ESPN. Each change was deployed with
+the same `gcloud run jobs deploy` command, run at least twice, and checked for
+identical row counts.
+
+| Change | Why |
+|---|---|
+| `player_stats.fg3a`, `player_stats.gp` | 3PT% is a scoring category (needs attempts); games played blends season stats with projections |
+| Top 100 free agents: `free_agents` table + their `player_stats` rows | The waiver analyzer and the z-score player pool |
+| `league_status` table | The season projection needs the current week and season length |
+| `rosters.expected_return_date` | The injury-aware projection uses ESPN's return date when there is one |
+| `teams.owner` = real name | ESPN's username (`ESPNFAN6474865950`) isn't who the league knows |
+| `transactions` from the raw activity feed: every page, lineup moves, `player_id`, `detail` | The activity log shows every activity; espn_api drops a move's team and every player id |
+| `player_details`, `player_seasons` tables | Health details and 3 seasons of games played for the Trade Analyzer's mock trade |
+| Snapshot tables replace the day's rows (`MERGE ... WHEN NOT MATCHED BY SOURCE`) | A player dropped mid-day lingered on his old roster |
+
+Counts after the latest pair of runs: `teams` 14, `matchup_categories` 196,
+`rosters` 169, `player_stats` 254, `transactions` 27 (5 adds/drops + 22 lineup
+moves), `free_agents` 100, `league_status` 1, `player_details` 269, `player_seasons`
+686 (208 / 231 / 247 players across the three seasons).
+
+More real bugs these changes caught:
+
+- **A mid-day drop left a stale roster row.** `MERGE` only inserted and updated, so
+  Malik Monk stayed on team 14 for the rest of the day after being dropped. Fixed by
+  the snapshot delete above, with a test on the generated SQL.
+- **espn_api's lineup moves have a string where a team should be.** Asking
+  `recent_activity()` for moves made the job crash (`'str' object has no attribute
+  'team_id'`): the library leaves the team blank on a move. The raw message has it
+  (`for`), so the feed is now read directly.
+- **ESPN rejects a `limit` without a sort.** The player-info request returned
+  `400: Limit request must be accompanied by a sort`; the id filter already bounds
+  the result, so the limit was dropped (checked: 100 of 100 players come back).

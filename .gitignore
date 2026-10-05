@@ -18,8 +18,12 @@ env/
 .ruff_cache/
 .coverage
 
-# Streamlit
+# Streamlit -- secrets.toml holds the manager logins' password hashes
 .streamlit/secrets.toml
+
+# Plain manager passwords from scripts/manage_logins.py, for the commissioner to hand
+# out. Never committed; delete after sending.
+manager-logins.csv
 
 # Editors / OS
 .DS_Store

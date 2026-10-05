@@ -1,140 +1,564 @@
-"""Trade Analyzer page (Step 6, added after the original proposal): pick "your team"
-and a trade partner from the league; pick players from each roster by clicking their
-row, which moves them into the selected-to-trade section below (click again to
-remove). Shows both sides' per-game category totals before the trade, after the
-trade, and the delta. Reads v_team_roster_stats. The before/after/delta math runs
-in trade.py, not in SQL -- the one page where that's deliberate, since the player
-selection is arbitrary and can't be precomputed.
+"""Trade Analyzer page (Step 6): recommends waiver pickups and trades for one team,
+ranked by how much each raises its expected all-play category wins (E), and keeps
+the mock-trade simulator from the original proposal.
+
+Controls: team (default team 10), stat window, swing size delta, per-category tier
+overrides. Four tabs: Team profile, Waiver wire, Trade finder, Mock trade. Any
+waiver or trade row loads into Mock trade, which runs the same simulation, so its
+numbers match the row's. The math lives in app/analysis (tested); this page only
+lays it out. Reads v_player_z (z-scores) and v_player_pool (per-game lines).
 """
 
 import pandas as pd
 import streamlit as st
 
+import analyzer
+import login
 import queries
 import ui
+from analysis.explain import explain
+from analysis.objective import expected_category_wins, matchup_record
+from analysis.trades import present, simulate_trade, top_targets, trade_chips
+from analysis.waivers import rank_waiver_moves
+from analysis.weights import compute_weights, punts
 from categories import COLUMNS, LABELS, fmt
+from categories import totals as totals_of
 from trade import trade_impact
 
 st.title("Trade Analyzer")
-st.caption(
-    "Pick two teams, then click players in each roster to put them in the trade. "
-    "Click a player again to take them back out."
-)
 
-players = queries.team_roster_stats()
-if players.empty:
-    st.info("No roster data yet.")
+names = analyzer.team_names()
+windows = analyzer.available_windows()
+if names.empty or not windows:
+    st.info("No player data yet.")
     st.stop()
 
-WINDOWS = {
-    "season": "Season",
-    "last_30": "Last 30 days",
-    "last_15": "Last 15 days",
-    "last_7": "Last 7 days",
-    "projected": "Projected",
-}
-available = [w for w in WINDOWS if w in set(players["stat_window"])]
-names = players.drop_duplicates("team_id").set_index("team_id")["team_name"].sort_values()
-
-c1, c2 = st.columns(2)
-mine = c1.selectbox("Your team", names.index, format_func=names.get)
-theirs = c2.selectbox("Trade partner", [t for t in names.index if t != mine], format_func=names.get)
-window = st.segmented_control(
-    "Stats from", available, default=available[0], format_func=WINDOWS.get, required=True
+team_ids = [int(t) for t in names.index]
+c1, c2, c3 = st.columns([1.6, 1, 1])
+# Each manager analyzes their own team; the commissioner (admin) can pick any.
+mine = login.my_team()
+me = c1.selectbox(
+    "Team",
+    team_ids if login.is_admin() else [mine],
+    index=team_ids.index(mine) if login.is_admin() and mine in team_ids else 0,
+    format_func=names.get,
+    disabled=not login.is_admin(),
+    help=None if login.is_admin() else "Recommendations are for your own team.",
+)
+window = c2.selectbox("Stats from", windows, format_func=analyzer.STAT_WINDOWS.get)
+delta = c3.number_input(
+    "Swing size δ (z)",
+    min_value=0.25,
+    max_value=3.0,
+    value=1.0,
+    step=0.25,
+    help="A realistic gain or loss in one category: 1.0 is about one solid starter.",
 )
 
-in_window = players.loc[players["stat_window"] == window]
-ROSTER_COLUMNS = ["player_name", "position", "lineup_slot", *COLUMNS]
-ROSTER_CONFIG = {
-    "player_name": "Player",
-    "position": st.column_config.TextColumn("Pos", width="small"),
-    "lineup_slot": st.column_config.TextColumn("Slot", width="small"),
-    **{
-        col: st.column_config.NumberColumn(
-            LABELS[col], format="%.3f" if col.endswith("_pct") else "%.1f"
-        )
-        for col in COLUMNS
-    },
-}
-
-
-def pick_players(team_id: int, column) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Shows a roster; returns it and the rows the user has clicked."""
-    roster = (
-        in_window.loc[in_window["team_id"] == team_id]
-        .sort_values("pts", ascending=False)
-        .reset_index(drop=True)
+with st.expander("Category strategy: override tiers"):
+    st.caption(
+        "Auto picks Lock, Swing or Punt from the standings. Override any category: "
+        "Lock and Swing change how much it counts, Punt drops it from your score."
     )
-    with column:
-        st.markdown(f"**{names[team_id]}**")
-        event = st.dataframe(
-            roster[ROSTER_COLUMNS],
-            column_config=ROSTER_CONFIG,
+    grid = st.columns(3)
+    choices = {
+        col: grid[i % 3].selectbox(
+            LABELS[col], ["Auto", "Lock", "Swing", "Punt"], key=f"tier-{me}-{col}"
+        )
+        for i, col in enumerate(COLUMNS)
+    }
+overrides = tuple(sorted((k, v) for k, v in choices.items() if v != "Auto"))
+
+players, totals = analyzer.league(window)
+if me not in totals.index:
+    st.info("This team has no players with stats in this window.")
+    st.stop()
+weights = analyzer.weights_by_team(window, me, delta, overrides)
+w_me = weights[me]
+punts_me = punts(w_me)
+player_name = players["player_name"]
+max_e = len(COLUMNS) * (len(totals) - 1)
+
+
+def team_label(team_id) -> str:
+    return "Free agents" if team_id == 0 else names.get(team_id, str(team_id))
+
+
+def names_of(ids) -> str:
+    return ", ".join(player_name[i] for i in ids)
+
+
+def cat_deltas(row, prefix="dE_") -> dict:
+    return {col: row[f"{prefix}{col}"] for col in COLUMNS}
+
+
+def load_into_mock(partner, give, get, my_drop=None, their_drop=None, my_add=None, their_add=None):
+    """Button callback: fill the Mock trade tab's controls with one deal."""
+
+    def one(x):
+        return int(x) if present(x) else None
+
+    st.session_state["mock-partner"] = int(partner)
+    st.session_state["mock-give"] = [int(x) for x in give]
+    st.session_state["mock-get"] = [int(x) for x in get]
+    st.session_state["mock-my-drop"] = one(my_drop)
+    st.session_state["mock-their-drop"] = one(their_drop)
+    st.session_state["mock-my-add"] = one(my_add)
+    st.session_state["mock-their-add"] = one(their_add)
+    st.toast("Loaded. Open the Mock trade tab to see it.")
+
+
+profile_tab, waiver_tab, finder_tab, mock_tab = st.tabs(
+    ["Team profile", "Waiver wire", "Trade finder", "Mock trade"]
+)
+
+# --- Team profile ------------------------------------------------------------------
+
+with profile_tab:
+    wins, losses, ties = matchup_record(totals, me)
+    m1, m2 = st.columns(2)
+    m1.metric(
+        "Category wins vs everyone (E)",
+        f"{expected_category_wins(totals, me, punts_me):g} of {max_e}",
+        help="Categories won if you played all 13 other teams; ties count half. "
+        "Punted categories don't count.",
+    )
+    m2.metric("All-play matchup record", f"{wins}-{losses}-{ties}")
+
+    def tier_text(row) -> str:
+        if row["tier"] == row["auto_tier"]:
+            return row["tier"]
+        return f"{row['tier']} (auto: {row['auto_tier']})"
+
+    profile = w_me.assign(
+        category=[LABELS[c] for c in w_me.index],
+        tier_shown=w_me.apply(tier_text, axis=1),
+    )
+    st.dataframe(
+        profile[["category", "rank", "total", "gap_above", "gap_below", "weight", "tier_shown"]],
+        column_config={
+            "category": "Category",
+            "rank": st.column_config.NumberColumn("Rank", width="small"),
+            "total": st.column_config.NumberColumn("Team z", format="%+.2f"),
+            "gap_above": st.column_config.NumberColumn(
+                "Gap to next team up", format="%.2f", help="z needed to pass the next team"
+            ),
+            "gap_below": st.column_config.NumberColumn("Lead over next team down", format="%.2f"),
+            "weight": st.column_config.NumberColumn(
+                "Weight", format="%.2f", help="How much this category counts (average 1.0)"
+            ),
+            "tier_shown": "Tier",
+        },
+        hide_index=True,
+        width="stretch",
+        height=ui.table_height(len(profile)),
+    )
+    st.caption(
+        "Lock: top 3 and nobody within δ behind. Punt: bottom 3 and nobody within δ "
+        "ahead. Swing: everything else, where a small gain flips matchups. Weights "
+        "drive every recommendation on this page."
+    )
+
+# --- Waiver wire -------------------------------------------------------------------
+
+with waiver_tab:
+    st.caption(
+        "Every free agent (top 100 on ESPN, none listed OUT) against every player you "
+        "could drop (not on IR), ranked by the change in your category wins."
+    )
+    moves = rank_waiver_moves(players, totals, me, w_me)
+    if moves.empty:
+        st.info("No free agents to evaluate.")
+    for k, move in moves.iterrows():
+        title = f"Add {move['add_name']} · drop {move['drop_name']}: {move['dE']:+g} category wins"
+        with st.expander(title):
+            st.write(explain(cat_deltas(move)))
+            dz = pd.Series({col: move[f"dz_{col}"] for col in COLUMNS})
+            up, down = dz.idxmax(), dz.idxmin()
+            st.caption(
+                f"Biggest gain: {LABELS[up]} {dz[up]:+.2f} z · biggest cost: "
+                f"{LABELS[down]} {dz[down]:+.2f} z · value to you Δv {move['dv']:+.2f} · "
+                f"{move['add_name']} is {str(move['injury_status']).replace('_', ' ').lower()}"
+            )
+            st.button(
+                "Load into mock trade",
+                key=f"waiver-load-{k}",
+                on_click=load_into_mock,
+                args=(0, [move["drop_id"]], [move["add_id"]]),
+            )
+
+# --- Trade finder ------------------------------------------------------------------
+
+with finder_tab:
+    st.caption(
+        "Every 1-for-1 and 2-for-1 deal with every other team. Only win-win deals are "
+        "kept: your category wins go up and theirs don't go down. Rosters stay full: "
+        "whoever gets two players drops their least useful one, and whoever gives two "
+        "picks up the best free agent for the open spot."
+    )
+    deals = analyzer.all_trades(window, me, delta, overrides)
+    f1, f2 = st.columns([1, 2])
+    hide_lopsided = f1.checkbox(
+        "Hide lopsided deals",
+        value=True,
+        help="Lopsided: the players given and received differ by more than 1.5 in "
+        "total z, so the other manager is unlikely to accept.",
+    )
+    sizes = f2.multiselect(
+        "Deal sizes", ["1-for-1", "2-for-1", "1-for-2"], default=["1-for-1", "2-for-1", "1-for-2"]
+    )
+    if deals.empty:
+        st.info("No win-win trades found.")
+    else:
+        shown = deals.assign(
+            size=deals["give_ids"].map(len).astype(str)
+            + "-for-"
+            + deals["get_ids"].map(len).astype(str)
+        )
+        if hide_lopsided:
+            shown = shown.loc[~shown["lopsided"]]
+        shown = shown.loc[shown["size"].isin(sizes)].head(15)
+        st.caption(f"{len(deals):,} win-win deals found; showing the best {len(shown)}.")
+        for k, deal in shown.iterrows():
+            title = (
+                f"{team_label(deal['partner_id'])}: give {names_of(deal['give_ids'])} for "
+                f"{names_of(deal['get_ids'])} · you {deal['dE_me']:+g}, them {deal['dE_them']:+g}"
+                + (" · Lopsided" if deal["lopsided"] else "")
+            )
+            with st.expander(title):
+                st.write(explain(cat_deltas(deal)))
+                extra = []
+                if present(deal["my_drop_id"]):
+                    extra.append(f"you drop {player_name[deal['my_drop_id']]}")
+                if present(deal["my_add_id"]):
+                    extra.append(f"you pick up {player_name[deal['my_add_id']]} (free agent)")
+                if present(deal["their_drop_id"]):
+                    extra.append(f"they drop {player_name[deal['their_drop_id']]}")
+                if present(deal["their_add_id"]):
+                    extra.append(f"they pick up {player_name[deal['their_add_id']]} (free agent)")
+                if extra:
+                    st.caption("To keep rosters full: " + "; ".join(extra) + ".")
+                st.caption(
+                    f"General value (total z): you give {deal['gen_give']:+.2f}, "
+                    f"you get {deal['gen_get']:+.2f}."
+                )
+                st.button(
+                    "Load into mock trade",
+                    key=f"trade-load-{k}",
+                    on_click=load_into_mock,
+                    args=(
+                        deal["partner_id"],
+                        deal["give_ids"],
+                        deal["get_ids"],
+                        deal["my_drop_id"],
+                        deal["their_drop_id"],
+                        deal["my_add_id"],
+                        deal["their_add_id"],
+                    ),
+                )
+
+    t1, t2 = st.columns(2)
+    with t1:
+        st.subheader("Top targets")
+        st.caption("Players on other rosters worth the most to you.")
+        targets = top_targets(players, me, w_me)
+        st.dataframe(
+            targets.assign(team=targets["team_id"].map(lambda t: team_label(int(t))))[
+                ["player_name", "team", "value", "generic"]
+            ],
+            column_config={
+                "player_name": "Player",
+                "team": "Team",
+                "value": st.column_config.NumberColumn("Value to you", format="%+.2f"),
+                "generic": st.column_config.NumberColumn("General value", format="%+.2f"),
+            },
             hide_index=True,
-            height=ui.table_height(len(roster)),
-            on_select="rerun",
-            selection_mode="multi-row",
-            # Keyed per team and window, so switching either starts a fresh pick.
-            key=f"roster-{team_id}-{window}",
+            width="stretch",
         )
-    return roster, roster.iloc[event.selection.rows]
+    with t2:
+        st.subheader("Trade chips")
+        st.caption("Your players worth more to others than to you.")
+        chips = trade_chips(players, me, w_me)
+        st.dataframe(
+            chips[["player_name", "value", "generic"]],
+            column_config={
+                "player_name": "Player",
+                "value": st.column_config.NumberColumn("Value to you", format="%+.2f"),
+                "generic": st.column_config.NumberColumn("General value", format="%+.2f"),
+            },
+            hide_index=True,
+            width="stretch",
+        )
+
+# --- Mock trade --------------------------------------------------------------------
 
 
-r1, r2 = st.columns(2)
-my_roster, my_out = pick_players(mine, r1)
-their_roster, their_out = pick_players(theirs, r2)
-
-st.subheader("The trade")
-if my_out.empty and their_out.empty:
-    st.info("No players selected yet.")
-    st.stop()
-
-s1, s2 = st.columns(2)
-s1.markdown(f"**{names[mine]} send**")
-s1.write(", ".join(my_out["player_name"]) or "Nobody")
-s2.markdown(f"**{names[theirs]} send**")
-s2.write(", ".join(their_out["player_name"]) or "Nobody")
-
-c = ui.colors()
+def keep_valid(key: str, options: list, multi: bool) -> None:
+    """Drop a stored selection that no longer fits the options (e.g. after the
+    partner changed), before the widget renders."""
+    value = st.session_state.get(key)
+    if value is None:
+        return
+    if multi:
+        st.session_state[key] = [v for v in value if v in options]
+    elif value not in options:
+        st.session_state[key] = None
 
 
-def delta_cell(col: str, value: float) -> str:
-    if pd.isna(value) or abs(value) < 1e-9:
-        return "–"
-    text = f"{value:+.3f}".replace("0.", ".") if col.endswith("_pct") else f"{value:+.1f}"
-    return f"▲ {text}" if value > 0 else f"▼ {text}"
+def per_game_lines(window: str) -> pd.DataFrame:
+    """Raw per-game lines for the per-game table. Blended has no raw line of its own,
+    so it uses each player's season stats once he has them, else his projection."""
+    pool = queries.player_pool()
+    if window != "blended":
+        return pool.loc[pool["stat_window"] == window]
+    pool = pool.loc[pool["stat_window"].isin(["season", "projected"])]
+    return pool.sort_values("stat_window", ascending=False).drop_duplicates("player_id")
 
 
-def impact_table(roster, sending, receiving) -> None:
-    impact = trade_impact(roster, sending["player_id"].tolist(), receiving)
-    table = pd.DataFrame(
-        {
-            "Category": [LABELS[col] for col in COLUMNS],
-            "Before": [fmt(col, impact.at[col, "before"]) for col in COLUMNS],
-            "After": [fmt(col, impact.at[col, "after"]) for col in COLUMNS],
-            "Change": [delta_cell(col, impact.at[col, "delta"]) for col in COLUMNS],
-        }
+with mock_tab:
+    st.caption(
+        "Try any deal, or load one from the other tabs. Pick Free agents as the "
+        "partner to try a pickup: what you send is dropped, what you get is added."
+    )
+    partner_options = [0, *[t for t in team_ids if t != me]]
+    keep_valid("mock-partner", partner_options, multi=False)
+    if st.session_state.get("mock-partner") is None:  # first visit: another team
+        st.session_state["mock-partner"] = partner_options[min(1, len(partner_options) - 1)]
+    partner = st.selectbox(
+        "Trade with", partner_options, format_func=team_label, key="mock-partner"
+    )
+    is_waiver = partner == 0
+
+    my_ids = [int(i) for i in players.index[players["team_id"] == me]]
+    if is_waiver:
+        their_ids = [int(i) for i in players.index[players["is_free_agent"]]]
+    else:
+        their_ids = [int(i) for i in players.index[players["team_id"] == partner]]
+    fa_ids = [int(i) for i in players.index[players["is_free_agent"]]]
+
+    def label(pid) -> str:
+        if pid is None:
+            return "Nobody"
+        tag = " (IR)" if players.at[pid, "is_ir"] else ""
+        return f"{player_name[pid]}{tag}"
+
+    keep_valid("mock-give", my_ids, multi=True)
+    keep_valid("mock-get", their_ids, multi=True)
+    g1, g2 = st.columns(2)
+    give = g1.multiselect(
+        "You drop" if is_waiver else "You send", my_ids, format_func=label, key="mock-give"
+    )
+    get = g2.multiselect(
+        "You add" if is_waiver else "You get", their_ids, format_func=label, key="mock-get"
     )
 
-    def color(cell: str) -> str:
-        if cell.startswith("▲"):
-            return f"color: {c['up']}"
-        if cell.startswith("▼"):
-            return f"color: {c['down']}"
-        return ""
+    with st.expander("Roster moves to keep rosters full"):
+        r1, r2 = st.columns(2)
+        my_drop_opts = [None, *[i for i in my_ids if i not in give]]
+        my_add_opts = [None, *[i for i in fa_ids if i not in get]]
+        keep_valid("mock-my-drop", my_drop_opts, multi=False)
+        keep_valid("mock-my-add", my_add_opts, multi=False)
+        my_drop = r1.selectbox("You also drop", my_drop_opts, format_func=label, key="mock-my-drop")
+        my_add = r1.selectbox("You also pick up", my_add_opts, format_func=label, key="mock-my-add")
+        their_drop = their_add = None
+        if not is_waiver:
+            their_drop_opts = [None, *[i for i in their_ids if i not in get]]
+            their_add_opts = [None, *[i for i in fa_ids if i != my_add]]
+            keep_valid("mock-their-drop", their_drop_opts, multi=False)
+            keep_valid("mock-their-add", their_add_opts, multi=False)
+            their_drop = r2.selectbox(
+                "They also drop", their_drop_opts, format_func=label, key="mock-their-drop"
+            )
+            their_add = r2.selectbox(
+                "They also pick up", their_add_opts, format_func=label, key="mock-their-add"
+            )
 
-    st.dataframe(table.style.map(color, subset=["Change"]), hide_index=True, width="stretch")
-    gained = int((impact["delta"] > 1e-9).sum())
-    lost = int((impact["delta"] < -1e-9).sum())
-    noun = "category" if gained == 1 else "categories"
-    st.caption(f"Better in {gained} {noun}, worse in {lost}.")
+    if not give and not get:
+        st.info("Pick players to see the result.")
+        st.stop()
 
+    them = None if is_waiver else partner
+    punts_them = () if is_waiver else punts(weights[partner])
+    after, mine, theirs = simulate_trade(
+        players,
+        totals,
+        me,
+        them,
+        give,
+        get,
+        my_drop,
+        their_drop,
+        my_add,
+        their_add,
+        punts_me,
+        punts_them,
+    )
 
-st.caption("Per-game roster totals, IR excluded. ▲ is better in every category.")
-h1, h2 = st.columns(2)
-with h1:
-    st.markdown(f"**{names[mine]}**")
-    impact_table(my_roster, my_out, their_out)
-with h2:
-    st.markdown(f"**{names[theirs]}**")
-    impact_table(their_roster, their_out, my_out)
+    st.subheader("Players in this deal")
+    moves = [(pid, "You drop" if is_waiver else "You send") for pid in give]
+    moves += [(pid, "You add" if is_waiver else "You get") for pid in get]
+    moves += [(pid, "You also drop") for pid in [my_drop] if pid]
+    moves += [(pid, "You pick up") for pid in [my_add] if pid]
+    moves += [(pid, "They drop") for pid in [their_drop] if pid]
+    moves += [(pid, "They pick up") for pid in [their_add] if pid]
+    profile = queries.player_profile().set_index("player_id")
+    deal_lines = per_game_lines(window).set_index("player_id")
+    STATUS = {"ACTIVE": "Healthy", "DAY_TO_DAY": "Day-to-day", "OUT": "Out"}
+
+    def health(pid) -> str:
+        if pid not in profile.index:
+            return ""
+        row = profile.loc[pid]
+        status = row["injury_status"] or "ACTIVE"
+        text = STATUS.get(status, str(status).replace("_", " ").title())
+        if pd.notna(row["expected_return_date"]):
+            text += f", back about {row['expected_return_date']:%b %-d}"
+        return text
+
+    def games_by_season(pid) -> str:
+        if pid not in profile.index:
+            return ""
+        row = profile.loc[pid]
+        seasons = [row["gp_3_seasons_ago"], row["gp_2_seasons_ago"], row["gp_last_season"]]
+        return " · ".join("–" if pd.isna(g) else f"{g:.0f}" for g in seasons)
+
+    deal_rows = []
+    for pid, move in moves:
+        # One player's 9 categories: percentages from his makes / attempts.
+        line = totals_of(deal_lines.loc[[pid]]) if pid in deal_lines.index else None
+        avg_gp = profile.at[pid, "avg_games_played"] if pid in profile.index else None
+        deal_rows.append(
+            {
+                "Move": move,
+                "Player": player_name[pid],
+                "Health": health(pid),
+                "Avg games (3 yrs)": avg_gp,
+                "Games by season": games_by_season(pid),
+                **{LABELS[c]: fmt(c, line[c]) if line is not None else "–" for c in COLUMNS},
+            }
+        )
+    st.dataframe(
+        pd.DataFrame(deal_rows),
+        column_config={
+            "Avg games (3 yrs)": st.column_config.NumberColumn(
+                format="%.1f",
+                help="Average games played over the last 3 seasons he was in the NBA",
+            ),
+            "Games by season": st.column_config.TextColumn(
+                help="Games played three, two and one seasons ago (– = not in the NBA)"
+            ),
+        },
+        hide_index=True,
+        width="stretch",
+    )
+    st.caption(
+        f"Per-game stats from: {analyzer.STAT_WINDOWS.get(window, window)}"
+        + (
+            " (season averages once a player has them, else ESPN's projection)."
+            if window == "blended"
+            else "."
+        )
+        + " Health is ESPN's status; it doesn't give injury type."
+    )
+    outlooks = [
+        (player_name[pid], profile.at[pid, "season_outlook"])
+        for pid, _ in moves
+        if pid in profile.index and pd.notna(profile.at[pid, "season_outlook"])
+    ]
+    if outlooks:
+        with st.expander("ESPN outlook for these players"):
+            for name, outlook in outlooks:
+                st.markdown(f"**{name}:** {outlook}")
+
+    def side_report(team_id, result, team_overrides, team_punts) -> None:
+        before_w = compute_weights(totals, team_id, delta, team_overrides)
+        after_w = compute_weights(after, team_id, delta, team_overrides)
+        e0 = expected_category_wins(totals, team_id, team_punts)
+        e1 = expected_category_wins(after, team_id, team_punts)
+        rec0, rec1 = matchup_record(totals, team_id), matchup_record(after, team_id)
+        st.markdown(f"**{team_label(team_id)}**")
+        a, b = st.columns(2)
+        a.metric("Category wins (E)", f"{e1:g}", f"{e1 - e0:+g}")
+        b.metric("Matchup record", "-".join(map(str, rec1)))
+        b.caption(f"was {'-'.join(map(str, rec0))}")
+        st.write(explain(result.cat_delta))
+
+        def arrow(x0, x1) -> str:
+            return str(x0) if x0 == x1 else f"{x0} → {x1}"
+
+        table = pd.DataFrame(
+            {
+                "Category": [LABELS[c] for c in COLUMNS],
+                "Rank": [arrow(before_w.at[c, "rank"], after_w.at[c, "rank"]) for c in COLUMNS],
+                "Tier": [arrow(before_w.at[c, "tier"], after_w.at[c, "tier"]) for c in COLUMNS],
+                "z ±": [after.at[team_id, c] - totals.at[team_id, c] for c in COLUMNS],
+                "Wins ±": [result.cat_delta[c] for c in COLUMNS],
+            }
+        )
+        st.dataframe(
+            table,
+            column_config={
+                "z ±": st.column_config.NumberColumn(
+                    format="%+.2f", help="Change in team z (sum of player z-scores)"
+                ),
+                "Wins ±": st.column_config.NumberColumn(
+                    format="%+g", help="Change in categories won against the other 13 teams"
+                ),
+            },
+            hide_index=True,
+            width="stretch",
+            height=ui.table_height(len(table)),
+        )
+
+    s1, s2 = st.columns(2)
+    with s1:
+        side_report(me, mine, dict(overrides), punts_me)
+    if theirs is not None:
+        with s2:
+            side_report(partner, theirs, None, punts_them)
+
+    with st.expander("Per-game totals before and after"):
+        lines = per_game_lines(window).set_index("player_id", drop=False)
+        c = ui.colors()
+
+        def delta_cell(col: str, value: float) -> str:
+            if pd.isna(value) or abs(value) < 1e-9:
+                return "–"
+            text = f"{value:+.3f}".replace("0.", ".") if col.endswith("_pct") else f"{value:+.1f}"
+            return f"▲ {text}" if value > 0 else f"▼ {text}"
+
+        def color(cell: str) -> str:
+            if cell.startswith("▲"):
+                return f"color: {c['up']}"
+            if cell.startswith("▼"):
+                return f"color: {c['down']}"
+            return ""
+
+        def per_game(team_id, out_ids, in_ids) -> None:
+            roster = lines.loc[lines["team_id"] == team_id]
+            receiving = lines.loc[[i for i in in_ids if i in lines.index]]
+            impact = trade_impact(roster, list(out_ids), receiving)
+            table = pd.DataFrame(
+                {
+                    "Category": [LABELS[col] for col in COLUMNS],
+                    "Before": [fmt(col, impact.at[col, "before"]) for col in COLUMNS],
+                    "After": [fmt(col, impact.at[col, "after"]) for col in COLUMNS],
+                    "Change": [delta_cell(col, impact.at[col, "delta"]) for col in COLUMNS],
+                }
+            )
+            st.markdown(f"**{team_label(team_id)}**")
+            st.dataframe(
+                table.style.map(color, subset=["Change"]), hide_index=True, width="stretch"
+            )
+
+        st.caption("Per-game roster totals, IR excluded. ▲ is better in every category.")
+        p1, p2 = st.columns(2)
+        with p1:
+            mine_out = [*give, *([my_drop] if my_drop else [])]
+            mine_in = [*get, *([my_add] if my_add else [])]
+            per_game(me, mine_out, mine_in)
+        if not is_waiver:
+            with p2:
+                theirs_out = [*get, *([their_drop] if their_drop else [])]
+                theirs_in = [*give, *([their_add] if their_add else [])]
+                per_game(partner, theirs_out, theirs_in)

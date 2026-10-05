@@ -2,3 +2,4 @@ espn-api
 pandas
 pandas-gbq
 google-cloud-bigquery
+requests
