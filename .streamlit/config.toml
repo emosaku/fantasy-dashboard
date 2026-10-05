@@ -1,0 +1,15 @@
+# Streamlit reads this from the directory it's launched in -- run the app from the
+# repo root (`streamlit run app/Home.py`).
+#
+# Blue accent instead of Streamlit's default red: on these pages red means "below
+# average" or "unlucky", so selected controls shouldn't wear it. Set per mode (not
+# a top-level primaryColor, which would pin the app to light mode) so the app still
+# follows the viewer's light/dark setting.
+[theme.light]
+primaryColor = "#2a78d6"
+
+[theme.dark]
+primaryColor = "#3987e5"
+
+[browser]
+gatherUsageStats = false

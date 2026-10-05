@@ -62,14 +62,15 @@ Workload Identity Federation (no JSON keys).
 | 3 | BigQuery data model — 5 raw tables (long format, makes/attempts not percentages) | **Complete** |
 | 4 | Ingest job — containerized Cloud Run Job, staging + `MERGE` for idempotency | **Complete** |
 | 5 | Analytics layer — BigQuery views (all-play, power rankings, luck, roster strength, team roster stats) | **Complete** |
-| 6 | Streamlit dashboard — 6 pages, cached queries, phone-friendly | Not started |
+| 6 | Streamlit dashboard — 6 pages, cached queries, phone-friendly | **Complete** (local) |
 | 7 | Deploy and share — Cloud Run service, CI/CD, one link for the league | Not started |
 
 ## Current state
 
 Steps 1-5 are real and live, not scaffolding: the GCP project, BigQuery tables, the
-ingest job, and the analytics views are all deployed and running. Steps 6-7
-(dashboard, CI/CD) are still scaffolding.
+ingest job, and the analytics views are all deployed and running. Step 6's dashboard
+runs locally against live BigQuery (`streamlit run app/Home.py` from the repo root);
+Step 7 (deploying it, CI/CD) is still to do.
 
 - `fantasy-dash-emk` is a real GCP project — billing linked, $5/month budget alert,
   the 6 required APIs enabled. `ingest-sa`/`dashboard-sa` service accounts exist with
@@ -86,14 +87,17 @@ ingest job, and the analytics views are all deployed and running. Steps 6-7
 - `sql/views/*.sql` — all 7 analytics views, live in the `fantasy` dataset. See
   [`docs/step5-analytics.md`](docs/step5-analytics.md) for what each one computes
   and how they were verified.
-- `app/Home.py`, `app/pages/*.py`, `app/queries.py` — Streamlit entry point, the 6
-  feature pages, and the page-to-view mapping module (Step 6), currently docstring-only
+- `app/` — the Streamlit dashboard: `Home.py` (navigation + standings), the 6 feature
+  pages in `app/pages/`, `queries.py` (the only place SQL lives), and the testable
+  math in `categories.py`, `compare.py` and `trade.py`. See
+  [`docs/step6-dashboard.md`](docs/step6-dashboard.md).
 - `.github/workflows/deploy-{ingest,app}.yml` — valid but `workflow_dispatch`-only
   (manual trigger), deliberately deferred until Step 7 — no point wiring up CI/CD
   before the dashboard exists to deploy
 - `tests/ingest/test_transform.py` covers the ingest job's transform logic (home/away
-  unpacking, stat-window selection, transaction flattening); `tests/app/` still has
-  its placeholder, pending Step 6
+  unpacking, stat-window selection, transaction flattening); `tests/app/test_math.py`
+  covers the dashboard's own math (percentage pooling, season averages, z-scores,
+  trade before/after)
 
 ## Setup
 
