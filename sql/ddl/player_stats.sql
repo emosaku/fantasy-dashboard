@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS `fantasy-dash-emk.fantasy.player_stats` (
   stl FLOAT64,
   blk FLOAT64,
   fg3m FLOAT64,
+  fg3a FLOAT64,  -- added in Step 5: 3PT% is a scoring category and needs attempts
   fgm FLOAT64,
   fga FLOAT64,
   ftm FLOAT64,

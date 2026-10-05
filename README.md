@@ -61,15 +61,15 @@ Workload Identity Federation (no JSON keys).
 | 2 | Local data access — prove `espn-api` can pull every dataset the 5 features need | **Complete** |
 | 3 | BigQuery data model — 5 raw tables (long format, makes/attempts not percentages) | **Complete** |
 | 4 | Ingest job — containerized Cloud Run Job, staging + `MERGE` for idempotency | **Complete** |
-| 5 | Analytics layer — BigQuery views (all-play, power rankings, luck, roster strength, team roster stats) | Not started |
+| 5 | Analytics layer — BigQuery views (all-play, power rankings, luck, roster strength, team roster stats) | **Complete** |
 | 6 | Streamlit dashboard — 6 pages, cached queries, phone-friendly | Not started |
 | 7 | Deploy and share — Cloud Run service, CI/CD, one link for the league | Not started |
 
 ## Current state
 
-Steps 1-4 are real and live, not scaffolding: the GCP project, BigQuery tables, and
-the ingest job are all deployed and running. Steps 5-7 (views, dashboard, CI/CD) are
-still scaffolding.
+Steps 1-5 are real and live, not scaffolding: the GCP project, BigQuery tables, the
+ingest job, and the analytics views are all deployed and running. Steps 6-7
+(dashboard, CI/CD) are still scaffolding.
 
 - `fantasy-dash-emk` is a real GCP project — billing linked, $5/month budget alert,
   the 6 required APIs enabled. `ingest-sa`/`dashboard-sa` service accounts exist with
@@ -83,8 +83,9 @@ still scaffolding.
   this surfaced and how they were fixed.
 - Cloud Scheduler (`espn-ingest-daily`, 5 AM `America/Phoenix`) and a Cloud Monitoring
   alert on job failures are both live.
-- `sql/views/*.sql` — one file per view named in the proposal (Step 5), currently
-  comment-only
+- `sql/views/*.sql` — all 7 analytics views, live in the `fantasy` dataset. See
+  [`docs/step5-analytics.md`](docs/step5-analytics.md) for what each one computes
+  and how they were verified.
 - `app/Home.py`, `app/pages/*.py`, `app/queries.py` — Streamlit entry point, the 6
   feature pages, and the page-to-view mapping module (Step 6), currently docstring-only
 - `.github/workflows/deploy-{ingest,app}.yml` — valid but `workflow_dispatch`-only

@@ -99,7 +99,7 @@ def test_transform_player_stats_only_includes_populated_windows():
             "2027_projected": {
                 "applied_total": 0,
                 "applied_avg": 0,
-                "avg": {"PTS": 20.0, "REB": 5.0, "TO": 2.0},
+                "avg": {"PTS": 20.0, "REB": 5.0, "TO": 2.0, "3PA": 6.0},
             },
         },
     )
@@ -114,6 +114,7 @@ def test_transform_player_stats_only_includes_populated_windows():
     assert row["stat_window"] == "projected"
     assert row["pts"] == 20.0
     assert row["turnovers"] == 2.0
+    assert row["fg3a"] == 6.0
     assert pd.isna(row["fg3m"])  # category absent from this player's avg dict
 
 

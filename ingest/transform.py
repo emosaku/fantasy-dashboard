@@ -30,6 +30,7 @@ CATEGORY_COLUMNS = {
     "STL": "stl",
     "BLK": "blk",
     "3PM": "fg3m",
+    "3PA": "fg3a",
     "FGM": "fgm",
     "FGA": "fga",
     "FTM": "ftm",
