@@ -389,6 +389,8 @@ whoever receives two players. The math lives in a tested package, `app/analysis/
   and season outlook, and games played in each of the last 3 seasons; the mock trade
   shows them for every player in the deal.
 - **Managers' real names** instead of ESPN usernames.
+- **Player Rankings** page: every player ranked in each category and overall,
+  league-wide, shaded like the team rankings, with team/position/health filters.
 
 ## Step 7: Deploy and share (about 4 hours)
 

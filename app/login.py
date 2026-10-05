@@ -9,13 +9,12 @@ written by scripts/manage_logins.py).
 Signing in also stores a signed 30-day token in a browser cookie, so a reload --
 which phones do whenever you switch back to the browser -- doesn't ask again. Log out
 clears it. Streamlit can read cookies (st.context.cookies, from the page's first
-request) but not set them, so a tiny script in a zero-height component writes them.
+request) but not set them, so a tiny script in a 1-pixel st.iframe writes them.
 """
 
 import json
 
 import streamlit as st
-import streamlit.components.v1 as components
 
 from auth import LockedOut, Throttle, authenticate, make_token, read_token
 
@@ -44,15 +43,16 @@ def throttle() -> Throttle:
 
 
 def _write_cookie(value: str, max_age_seconds: int) -> None:
-    """Set (or, with max_age 0, delete) the session cookie in the browser. The
-    component's iframe shares the page's origin, so document.cookie is the site's."""
-    components.html(
+    """Set (or, with max_age 0, delete) the session cookie in the browser. st.iframe
+    runs an HTML string with same-origin access, so document.cookie is the site's.
+    The HTML is fixed here; the only value in it is our own server-made token."""
+    st.iframe(
         "<script>"
         f"document.cookie = {json.dumps(COOKIE)} + '=' + {json.dumps(value)}"
         f" + '; Path=/; Max-Age={max_age_seconds}; SameSite=Lax'"
         " + (location.protocol === 'https:' ? '; Secure' : '');"
         "</script>",
-        height=0,
+        height=1,
     )
 
 

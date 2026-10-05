@@ -62,6 +62,29 @@ def style(fig: go.Figure, height: int = 400) -> go.Figure:
     return fig
 
 
+def _mix(a: str, b: str, t: float) -> str:
+    """Blend two #rrggbb colors: t=0 -> a, t=1 -> b."""
+    ca = [int(a[i : i + 2], 16) for i in (1, 3, 5)]
+    cb = [int(b[i : i + 2], 16) for i in (1, 3, 5)]
+    return "#" + "".join(f"{round(x + (y - x) * t):02x}" for x, y in zip(ca, cb, strict=True))
+
+
+def rank_cell_style(rank: float, worst: int) -> str:
+    """CSS for a table cell shaded by rank, the same scale as the team rankings grid:
+    rank 1 blue, the middle gray, the last red."""
+    c = colors()
+    if rank != rank or worst <= 1:  # NaN or a single row
+        return ""
+    t = (rank - 1) / (worst - 1)
+    background = (
+        _mix(c["positive"], c["midpoint"], t * 2)
+        if t <= 0.5
+        else _mix(c["midpoint"], c["negative"], (t - 0.5) * 2)
+    )
+    text = "#ffffff" if c is DARK else "#0b0b0b"
+    return f"background-color: {background}; color: {text}"
+
+
 def table_height(rows: int) -> int:
     """Pixel height that shows every row of an st.dataframe without inner scrolling."""
     return 35 * (rows + 1) + 3

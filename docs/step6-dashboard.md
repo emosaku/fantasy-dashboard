@@ -42,7 +42,7 @@ BigQuery views (Step 5)
 | `app/categories.py` | The 9 categories, display formatting (`.471`, `112.2`), and `totals()` — sum counting stats and makes/attempts, then recompute percentages |
 | `app/compare.py` | Compare's week/season stat lines, league z-scores, head-to-head count |
 | `app/trade.py` | The mock trade's per-game before/after/delta |
-| `app/analysis/` | `pool`, `weights`, `objective`, `waivers`, `trades`, `explain` (the Trade & Waiver Analyzer) and `projection` (Power Rankings' projected finish) |
+| `app/analysis/` | `pool`, `weights`, `objective`, `waivers`, `trades`, `explain` (the Trade & Waiver Analyzer), `projection` (Power Rankings' projected finish) and `rankings` (Player Rankings) |
 | `app/analyzer.py` | Cached glue between the z-score views and `app/analysis/` |
 | `app/refresh.py` | Runs the ingest job through the Cloud Run API and waits for it; 10-minute cooldown |
 | `app/ui.py` | Chart colors per light/dark theme, shared Plotly layout, `table_height()`, the sidebar's freshness note and Refresh button |
@@ -60,6 +60,7 @@ BigQuery views (Step 5)
 | **Transactions** | dates, teams, actions, players (one filter bar for the chart and the log) | stacked activity per team with counts (adds, drops, trades, lineup moves); activity log of every matching row, lineup moves with their slots | `v_transactions` |
 | **Roster Strength** | Category rankings tab: lens (roster strength / results), stat window, highlighted team (yours by default), sort. Per-game totals tab: stat window | rankings grid (rank per team × category plus average rank, the highlighted team outlined with Lock / Swing / Punt) and a category detail bar chart; per-game heatmap | `v_category_ranks`, `v_roster_strength` |
 | **Trade Analyzer** | team (locked to yours unless admin), stat window, swing size δ, tier overrides | four tabs: Team profile; Waiver wire; Trade finder (win-win deals, top targets, trade chips); Mock trade | `v_player_z`, `v_player_pool`, `v_player_profile` |
+| **Player Rankings** | stat window; players (all, your team, free agents, any team); show ranks, per-game values or z-scores; name search; positions; hide injured | one table of every pool player: overall rank and rank in each of the 9 categories, shaded blue (1st) to red (last) like the team grid; team, position and health. Ranks are league-wide, so filters don't change them; columns sort; Player stays pinned when a phone swipes sideways | `v_player_z` |
 
 ### Choices made along the way
 
@@ -183,7 +184,7 @@ dark mode (picked from Streamlit's active theme via `st.context.theme`):
 
 ## Verification
 
-- **Unit tests** — 64 in total across `tests/`. For the dashboard:
+- **Unit tests** — 67 in total across `tests/` (including `test_rankings.py`: league-wide ranks, shared ties, overall order). For the dashboard:
   - `test_math.py` (9): percentage pooling (1-for-1 plus 40-for-100 = 41/101, not
     70%), season averages, z-scores, head-to-head, per-game trade before/after
   - `test_analysis.py` (16): the spec's checks on a synthetic 4-team league — a

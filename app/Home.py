@@ -63,6 +63,9 @@ PAGES = {
     "trade": st.Page(
         "pages/6_Trade_Analyzer.py", title="Trade Analyzer", icon=":material/handshake:"
     ),
+    "players": st.Page(
+        "pages/7_Player_Rankings.py", title="Player Rankings", icon=":material/person_search:"
+    ),
 }
 PAGE_BLURBS = [
     (PAGES["compare"], "Any two teams, category by category, for a week or the season."),
@@ -71,6 +74,7 @@ PAGE_BLURBS = [
     (PAGES["txn"], "Every add, drop, trade and lineup move, filterable."),
     (PAGES["strength"], "How each roster stacks up in every category, by recent form."),
     (PAGES["trade"], "Your best waiver pickups and win-win trades, and a mock-trade simulator."),
+    (PAGES["players"], "Every player ranked in every category, rostered or free agent."),
 ]
 
 login.sync_cookie()

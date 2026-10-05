@@ -25,6 +25,8 @@ What the dashboard does:
 - **Trade Analyzer** — for the signed-in manager's team: waiver pickups and win-win
   trades ranked by category wins gained, with plain-text explanations, and a mock-trade
   simulator showing health and games-played history for every player in the deal
+- **Player Rankings** — every player, rostered or free agent, ranked in each category
+  and overall, shaded like the team rankings, with team, position and health filters
 
 The original build plan, and every feature added since, lives in
 [`docs/proposal.md`](docs/proposal.md).
@@ -42,7 +44,7 @@ Cloud Run Job: espn-ingest  ──reads cookies──  Secret Manager (espn_s2, 
 BigQuery: fantasy dataset (9 raw tables + 12 analytics views)
         │
         ▼
-Cloud Run service fantasy-dash: Streamlit app (7 pages, cached reads, manager logins)
+Cloud Run service fantasy-dash: Streamlit app (8 pages, cached reads, manager logins)
         │
         ▼
 League managers (one link, any device, own username and password)
@@ -63,7 +65,7 @@ the tests on every push; deploys are a single `gcloud` command each.
 | 3 | BigQuery data model — raw tables (long format, makes/attempts not percentages) | **Complete** |
 | 4 | Ingest job — containerized Cloud Run Job, staging + `MERGE` for idempotency | **Complete** |
 | 5 | Analytics layer — BigQuery views (all-play, rankings, luck, z-scores, category ranks) | **Complete** |
-| 6 | Streamlit dashboard — 7 pages, logins, recommendations, phone-friendly | **Complete** |
+| 6 | Streamlit dashboard — 8 pages, logins, recommendations, phone-friendly | **Complete** |
 | 7 | Deploy and share — Cloud Run service, CI, one link for the league | **Complete** |
 
 ## Current state
@@ -90,7 +92,7 @@ locally with `streamlit run app/Home.py` from the repo root.
   [`docs/step5-analytics.md`](docs/step5-analytics.md).
 - `app/` — the Streamlit dashboard, behind manager logins created with
   `python scripts/manage_logins.py`. See [`docs/step6-dashboard.md`](docs/step6-dashboard.md).
-- `tests/` — 64 tests: the ingest transforms and MERGE statement, the dashboard's math,
+- `tests/` — 67 tests: the ingest transforms and MERGE statement, the dashboard's math,
   the trade/waiver analyzer (on a synthetic 4-team league), the season projection,
   logins, and the refresh button.
 - `.github/workflows/ci.yml` — lint, formatting and all tests on Python 3.12 on every
@@ -145,7 +147,7 @@ FantasyDashboard/
 ├── Dockerfile, .gcloudignore    # the dashboard's image; what may be uploaded to build it
 ├── app/                         # Streamlit dashboard
 │   ├── Home.py                  # login gate, navigation, standings
-│   ├── pages/                   # the 6 feature pages
+│   ├── pages/                   # the 7 feature pages
 │   ├── queries.py               # the only place SQL lives; every read cached 1 hour
 │   ├── analysis/                # trade/waiver analyzer + season projection (pure, tested)
 │   ├── analyzer.py              # cached glue between the views and analysis/
