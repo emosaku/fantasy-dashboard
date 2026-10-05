@@ -94,7 +94,13 @@ def sidebar_freshness() -> None:
     if clicked:
         with st.sidebar.status("Pulling the latest from ESPN...") as status:
             try:
-                refresh.run_ingest()
+                before = queries.latest_ingest_uncached()
+
+                def landed() -> bool:
+                    latest = queries.latest_ingest_uncached()
+                    return latest is not None and (before is None or latest > before)
+
+                refresh.run_ingest(landed)
             except Exception as error:  # surface any failure in the sidebar, not a traceback
                 status.update(label="Refresh failed", state="error")
                 st.sidebar.error(str(error))

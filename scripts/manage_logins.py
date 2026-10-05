@@ -2,6 +2,7 @@
 
     python scripts/manage_logins.py                    # a login for every manager without one
     python scripts/manage_logins.py --reset eni.mosaku # a new password for one manager
+    python scripts/manage_logins.py --reset-all --password "..."  # one password for all
 
 Reads the league's managers from BigQuery (latest teams snapshot), gives each a
 username (first.last) and a random password, and writes:
@@ -19,6 +20,7 @@ any team in the Trade Analyzer; the commissioner (eni.mosaku) is one by default.
 import argparse
 import csv
 import os
+import secrets
 import sys
 import tomllib
 from pathlib import Path
@@ -60,24 +62,28 @@ def managers() -> list[dict]:
     return out
 
 
-def load_users() -> dict:
+def load_auth() -> dict:
     if not SECRETS.exists():
         return {}
     data = tomllib.loads(SECRETS.read_text())
     if set(data) - {"auth"}:
         sys.exit(f"{SECRETS} holds more than logins; edit it by hand instead.")
-    return data.get("auth", {}).get("users", {})
+    return data.get("auth", {})
 
 
 def toml_string(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def write_users(users: dict) -> None:
+def write_users(users: dict, cookie_secret: str) -> None:
     lines = [
         "# Dashboard manager logins -- written by scripts/manage_logins.py.",
         "# Salted scrypt hashes only; the passwords themselves are never stored.",
         "# Git-ignored. Don't edit by hand: re-run the script (--reset to change one).",
+        "",
+        "[auth]",
+        "# Signs the 30-day 'stay signed in' cookies. Changing it signs everyone out.",
+        f"cookie_secret = {toml_string(cookie_secret)}",
         "",
     ]
     for username in sorted(users):
@@ -100,9 +106,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--reset", nargs="*", default=[], help="usernames to give new passwords")
     parser.add_argument("--admin", nargs="*", default=[], help="usernames that can view any team")
+    parser.add_argument(
+        "--reset-all", action="store_true", help="give every manager a new password"
+    )
+    parser.add_argument(
+        "--password",
+        help="use this password for every login being created or reset, instead of random ones",
+    )
     args = parser.parse_args()
 
-    existing = load_users()
+    auth = load_auth()
+    existing = auth.get("users", {})
+    cookie_secret = auth.get("cookie_secret") or secrets.token_hex(32)
     admins = DEFAULT_ADMINS | set(args.admin)
     users, issued, taken = {}, [], set()
     for manager in managers():
@@ -112,10 +127,10 @@ def main() -> None:
         taken.add(username)
 
         old = existing.get(username)
-        if old and username not in args.reset:
+        if old and username not in args.reset and not args.reset_all:
             salt, digest = old["salt"], old["hash"]
         else:
-            password = new_password()
+            password = args.password or new_password()
             salt, digest = hash_password(password)
             issued.append({**manager, "username": username, "password": password})
         users[username] = {
@@ -130,7 +145,7 @@ def main() -> None:
         print(f"Removed {gone}: no longer a manager in the league.")
     for unknown in sorted(set(args.reset) - set(users)):
         print(f"No manager with username {unknown!r}; nothing reset.")
-    write_users(users)
+    write_users(users, cookie_secret)
     print(f"{len(users)} logins in {SECRETS.relative_to(ROOT)}.")
 
     if issued:

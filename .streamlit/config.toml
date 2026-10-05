@@ -13,3 +13,8 @@ primaryColor = "#3987e5"
 
 [browser]
 gatherUsageStats = false
+
+[client]
+# A league website, not a developer tool: hide Streamlit's Deploy button and
+# developer menu items.
+toolbarMode = "viewer"

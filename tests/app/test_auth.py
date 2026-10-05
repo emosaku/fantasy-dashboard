@@ -10,7 +10,9 @@ from auth import (
     authenticate,
     check_password,
     hash_password,
+    make_token,
     new_password,
+    read_token,
     username_for,
 )
 
@@ -74,3 +76,36 @@ def test_success_clears_earlier_failures():
     authenticate(users, "eni.mosaku", "wrong", throttle, now=1)
     authenticate(users, "eni.mosaku", "k7mq-2vxd-p9ht", throttle, now=2)
     assert authenticate(users, "eni.mosaku", "wrong", throttle, now=3) is None  # not locked
+
+
+SECRET = "server-side-secret"
+
+
+def test_token_round_trip():
+    users = make_users()
+    token = make_token("eni.mosaku", users, SECRET, now=1000)
+    assert read_token(token, users, SECRET, now=1000 + 86400)["username"] == "eni.mosaku"
+
+
+def test_token_expires_after_30_days():
+    users = make_users()
+    token = make_token("eni.mosaku", users, SECRET, now=1000)
+    assert read_token(token, users, SECRET, now=1000 + 31 * 86400) is None
+
+
+def test_token_cannot_be_forged_or_extended():
+    users = make_users()
+    username, expires, signature = make_token("eni.mosaku", users, SECRET, now=1000).split("|")
+    assert (
+        read_token(f"{username}|{int(expires) + 10**6}|{signature}", users, SECRET, now=0) is None
+    )
+    assert read_token(f"chris.tetteh|{expires}|{signature}", users, SECRET, now=0) is None
+    assert read_token(make_token("eni.mosaku", users, "other-secret"), users, SECRET) is None
+    assert read_token("garbage", users, SECRET) is None
+    assert read_token(None, users, SECRET) is None
+
+
+def test_password_reset_invalidates_old_tokens():
+    token = make_token("eni.mosaku", make_users(), SECRET, now=1000)
+    reset = make_users(password="new-pass-word")  # new salt and hash
+    assert read_token(token, reset, SECRET, now=2000) is None

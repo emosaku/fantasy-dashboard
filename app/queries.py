@@ -63,6 +63,18 @@ def last_updated() -> pd.Timestamp | None:
     return None if pd.isna(ts) else ts
 
 
+def latest_ingest_uncached() -> pd.Timestamp | None:
+    """When the last complete ingest finished loading -- league_status is the table
+    it writes last. Not cached: the Refresh button polls it while the job runs."""
+    df = (
+        _client()
+        .query(f"SELECT MAX(ingested_at) AS ts FROM {_table('league_status')}")
+        .to_dataframe(create_bqstorage_client=False)
+    )
+    ts = df["ts"].iloc[0]
+    return None if pd.isna(ts) else ts
+
+
 def team_week_cats() -> pd.DataFrame:
     """Compare page."""
     return _current_season("v_team_week_cats")

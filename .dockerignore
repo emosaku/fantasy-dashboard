@@ -1,0 +1,24 @@
+# Same exclusions as .gcloudignore, for local `docker build` runs.
+
+# Secrets -- never leave this machine
+.env
+.streamlit/secrets.toml
+manager-logins.csv
+
+# Everything else the image doesn't use
+.git/
+.gitignore
+.github/
+.venv/
+venv/
+**/__pycache__/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+ingest/
+sql/
+tests/
+notebooks/
+docs/
+scripts/
+*.md

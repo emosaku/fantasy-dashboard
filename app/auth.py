@@ -94,3 +94,47 @@ def authenticate(users: dict, username: str, password: str, throttle: Throttle, 
         }
     throttle.record_failure(username, now)
     return None
+
+
+# --- Staying signed in --------------------------------------------------------------
+# A phone often reloads the page when you come back to the browser, which starts a new
+# Streamlit session. To keep managers signed in across that, the browser keeps a
+# signed token in a cookie: "username|expires|signature". The signature is an HMAC
+# with a secret only the server knows (secrets.toml), over the username, the expiry
+# and part of the user's password hash -- so it can't be forged or extended, and
+# resetting a password invalidates every token issued before.
+
+TOKEN_DAYS = 30
+
+
+def _token_signature(username: str, expires: int, password_hash: str, secret: str) -> str:
+    message = f"{username}|{expires}|{password_hash[:16]}".encode()
+    return hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()
+
+
+def make_token(username: str, users: dict, secret: str, now: float | None = None) -> str:
+    expires = int((time.time() if now is None else now) + TOKEN_DAYS * 86400)
+    signature = _token_signature(username, expires, users[username]["hash"], secret)
+    return f"{username}|{expires}|{signature}"
+
+
+def read_token(token: str | None, users: dict, secret: str, now: float | None = None):
+    """The user's record (as authenticate returns it) for a valid, unexpired token,
+    else None."""
+    try:
+        username, expires, signature = (token or "").split("|")
+        expires = int(expires)
+    except ValueError:
+        return None
+    user = users.get(username)
+    if not user or not secret or expires < (time.time() if now is None else now):
+        return None
+    expected = _token_signature(username, expires, user["hash"], secret)
+    if not hmac.compare_digest(expected, signature):
+        return None
+    return {
+        "username": username,
+        "name": user["name"],
+        "team_id": int(user["team_id"]),
+        "admin": bool(user.get("admin", False)),
+    }

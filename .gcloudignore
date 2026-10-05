@@ -1,0 +1,26 @@
+# What `gcloud run deploy --source .` must NOT upload to Cloud Build. Only the
+# dashboard's image is built from here, and it needs just Dockerfile,
+# requirements.txt, app/ and .streamlit/config.toml.
+
+# Secrets -- never leave this machine
+.env
+.streamlit/secrets.toml
+manager-logins.csv
+
+# Everything else the image doesn't use
+.git/
+.gitignore
+.github/
+.venv/
+venv/
+**/__pycache__/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+ingest/
+sql/
+tests/
+notebooks/
+docs/
+scripts/
+*.md

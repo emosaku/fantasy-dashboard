@@ -374,6 +374,8 @@ whoever receives two players. The math lives in a tested package, `app/analysis/
   hashes are stored (`.streamlit/secrets.toml`, git-ignored); 5 wrong passwords lock
   a username for 15 minutes. A manager's team is the default everywhere and the
   Trade Analyzer is locked to it, so everyone gets recommendations for their own team.
+  A signed 30-day cookie keeps managers signed in across reloads (phones reload
+  often).
 - **Projected finish** on Power Rankings: actual all-play results for finished weeks
   plus each remaining week projected from today's rosters, leaving injured players
   out of the weeks they're expected to miss (ESPN's return date, else 4 weeks for
@@ -416,7 +418,8 @@ gcloud run deploy fantasy-dash \
   a load balancer.
 
 **Done when:** someone in the league opens the link on their phone and sees today's
-data.
+data. **Done** — live on Cloud Run as `fantasy-dash`; see
+[step7-deploy.md](step7-deploy.md) for exactly what was built.
 
 ## Timeline, cost, and risks
 

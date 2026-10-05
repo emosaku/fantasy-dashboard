@@ -1,144 +1,153 @@
 # Step 7: Deploy and share
 
-Step 7 takes the Streamlit app and puts it on a URL the league can actually open.
-It's the last step, and — as of Step 6 finishing — the only one left with nothing
-blocking it.
-
-## What already exists for this step
-
-- `dashboard-sa` service account — BigQuery Data Viewer, BigQuery Job User. Created
-  back in Step 1, unused until now; this is the step where it actually gets
-  attached to a running service (and gets the two narrow grants below).
-- The Cloud Run + Cloud Build + Artifact Registry deploy pattern Step 4 already
-  proved out end-to-end for `espn-ingest` (including the real gotchas documented in
-  `docs/step4-ingest.md` — schema pinning, the Cloud Run v2 Jobs API, etc.).
-- **Step 6 is done and tested.** Home plus 6 pages (Compare, Power Rankings,
-  Matchups and Luck, Transactions, Roster Strength, Trade Analyzer) read live
-  BigQuery views through `queries.py`, behind manager logins; the trade/waiver
-  analyzer and season projection live in `app/analysis/`. 61 tests pass across the
-  repo. See [step6-dashboard.md](step6-dashboard.md).
-- Manager logins: `scripts/manage_logins.py` writes the password hashes to
-  `.streamlit/secrets.toml` (git-ignored) — the deployed service needs that file.
-- The Refresh data button (`app/refresh.py`) calls the Cloud Run API to run
-  `espn-ingest` — the deployed service needs permission to.
-- `.streamlit/config.toml` sets the app's theme (blue accent, since red reads as
-  "below average"/"unlucky" on these pages — it shouldn't also mean "selected").
-
-What's missing is everything Step 7 itself builds: no `Dockerfile` for `app/` yet,
-nothing deployed, no CI/CD wired up.
-
-## What Step 7 builds
-
-### 1. Containerize and deploy as a Cloud Run **Service** (not a Job)
-
-A Job runs once and exits (`espn-ingest`); a Service stays up and serves requests —
-what a dashboard needs.
+The dashboard is live on Cloud Run as the service **`fantasy-dash`** (region
+`us-west1`), on its default `*.run.app` address. Every manager signs in with their
+own login, on a phone or a computer. The address isn't written here on purpose —
+the repo is public — and is shown by:
 
 ```bash
-gcloud run deploy fantasy-dash \
-  --source app/ --region us-west1 \
-  --project fantasy-dash-emk \
+gcloud run services describe fantasy-dash --region us-west1 --project fantasy-dash-emk \
+  --format='value(status.url)'
+```
+
+## What was built
+
+### 1. The image (`Dockerfile` at the repo root)
+
+`python:3.12-slim`, the pinned `requirements.txt`, `app/` and
+`.streamlit/config.toml`, running
+`streamlit run app/Home.py --server.port=$PORT --server.address=0.0.0.0`. It's built
+from the repo root because it needs the theme file next to `app/`; the ingest job
+keeps its own image in `ingest/`.
+
+**`.gcloudignore` decides what gets uploaded to Cloud Build** — only the Dockerfile,
+requirements, `app/` and `.streamlit/config.toml`. It excludes `.env` (ESPN cookies),
+`.streamlit/secrets.toml` (login hashes) and `manager-logins.csv` (passwords) by
+name; `gcloud meta list-files-for-upload .` confirms the upload set before a deploy.
+`.dockerignore` mirrors it for local builds.
+
+`.streamlit/config.toml` sets `toolbarMode = "viewer"`, which hides Streamlit's
+developer "Deploy" button and menu items from the league.
+
+### 2. Logins, from Secret Manager
+
+The login hashes live in the secret **`dashboard-logins`** (a copy of the local,
+git-ignored `.streamlit/secrets.toml`), mounted into the container as Streamlit's
+global secrets file, `/root/.streamlit/secrets.toml`. Not inside the app's own
+`.streamlit/` folder: a Cloud Run secret mount takes over its whole directory and
+would hide `config.toml`.
+
+**After adding or resetting logins** with `scripts/manage_logins.py`, publish the new
+file and roll the service so it reads it:
+
+```bash
+gcloud secrets versions add dashboard-logins --data-file=.streamlit/secrets.toml
+gcloud run services update fantasy-dash --region us-west1 --project fantasy-dash-emk \
+  --update-labels=logins-updated=$(date +%s)
+```
+
+**Stay signed in.** Phones reload a page whenever you switch back to the browser,
+which would otherwise mean signing in again each time. Signing in now stores a signed
+30-day token in a cookie (`app/auth.py`, `app/login.py`): an HMAC over the username,
+expiry and part of the password hash, keyed with `cookie_secret` from the logins
+file. It can't be forged or extended, log out clears it, and resetting a password
+invalidates it.
+
+### 3. Permissions: two narrow grants to `dashboard-sa`
+
+The service runs as `dashboard-sa`, which already had BigQuery Data Viewer and Job
+User. Step 7 added only:
+
+| Grant | On | For |
+|---|---|---|
+| `roles/secretmanager.secretAccessor` | the `dashboard-logins` secret only | reading the logins |
+| `roles/run.invoker` | the `espn-ingest` job only | the Refresh data button |
+
+The Refresh button starts the job, then waits for the data rather than watching the
+job: watching would need `run.operations.get`, which can only be granted
+project-wide. Ingest writes `league_status` last, so a newer timestamp there means
+the whole refresh has landed. `dashboard-sa` still can't read the ESPN cookie
+secrets; the job runs as `ingest-sa`.
+
+### 4. The deploy command
+
+```bash
+gcloud run deploy fantasy-dash --project fantasy-dash-emk \
+  --source . --region us-west1 \
   --service-account dashboard-sa@fantasy-dash-emk.iam.gserviceaccount.com \
-  --allow-unauthenticated --min-instances 0 --max-instances 2 \
-  --session-affinity \
+  --allow-unauthenticated \
+  --min-instances 0 --max-instances 2 \
+  --session-affinity --timeout 3600 \
+  --memory 1Gi --cpu 1 \
+  --set-secrets /root/.streamlit/secrets.toml=dashboard-logins:latest \
   --set-env-vars GCP_PROJECT_ID=fantasy-dash-emk,BIGQUERY_DATASET=fantasy
 ```
 
-The Dockerfile runs
-`streamlit run Home.py --server.port=$PORT --server.address=0.0.0.0`.
-`--session-affinity` matters specifically here: Streamlit holds a websocket open
-for live updates, and without affinity Cloud Run could bounce a viewer to a
-different container instance mid-session and break the connection.
+- `--allow-unauthenticated` lets the link reach the app; the app itself requires a
+  login on every page.
+- `--min-instances 0` scales to zero when nobody's using it: about $0 at league
+  scale, at the cost of a few seconds' wake-up on the first visit after a quiet spell.
+- `--session-affinity` and `--timeout 3600`: Streamlit holds a websocket open for the
+  whole visit. Affinity keeps a viewer on one instance; the default 5-minute request
+  timeout would cut every session off after 5 minutes.
+- `--set-env-vars` replaces the whole list — re-run it complete.
 
-**Two things the image must carry from outside `app/`:** the theme in
-`.streamlit/config.toml` (Streamlit reads `.streamlit/` from the working directory,
-which is the repo root locally), and nothing else — the logins come in at runtime
-(section 2). Either copy `config.toml` into the image's working directory, or build
-from the repo root with a Dockerfile that copies `app/` and `.streamlit/config.toml`.
+To redeploy after code changes, run the same command from the repo root.
 
-**One simplification `app/`'s Dockerfile gets that `ingest/`'s didn't need:**
-`app/`'s modules already use flat imports (`import queries`, `from categories import
-...`) rather than package-qualified ones, because that's how Streamlit itself runs
-the app (`streamlit run app/Home.py` puts `app/` directly on `sys.path` —
-`tests/app/conftest.py` recreates that same path setup for pytest). `ingest/`'s
-Dockerfile needed the self-nesting `COPY . ./ingest` trick specifically to keep
-`from ingest.transform import ...` working inside the container; `app/`'s
-Dockerfile can just be a plain `COPY . .` with the build context pointed at `app/`
-directly — no trick needed, because there's no package prefix to preserve.
+### 5. Phones
 
-### 2. Access control: logins and two narrow grants
+Streamlit pages adapt to the screen on their own: columns stack, the sidebar
+becomes a menu button, charts resize. Checked on the live site at iPhone width
+(390 px): every page renders with no errors and nothing scrolls sideways. Fixed
+along the way: the Roster Strength category chart's value labels were cut off or ran
+into team names, and pre-season scoreboards said "Tied 0-0-0" (now "Not played
+yet"). Managers can use **Add to Home Screen** for an app-like icon.
 
-`--allow-unauthenticated` only lets the link reach the app; every page sits behind a
-manager login (Step 6). The deployed service needs:
+## Verified on the live site
 
-1. **The login hashes**, from Secret Manager:
-   ```bash
-   gcloud secrets create dashboard-logins --data-file=.streamlit/secrets.toml
-   gcloud secrets add-iam-policy-binding dashboard-logins \
-     --member=serviceAccount:dashboard-sa@fantasy-dash-emk.iam.gserviceaccount.com \
-     --role=roles/secretmanager.secretAccessor
-   ```
-   Mount it with `--set-secrets` as a file. **Gotcha:** a Cloud Run secret mount
-   takes over its whole directory, so mounting at `<workdir>/.streamlit/secrets.toml`
-   would hide `config.toml` next to it. Mount it as Streamlit's global secrets file
-   instead (`/root/.streamlit/secrets.toml`, i.e. the container user's home), which
-   Streamlit also reads. After `manage_logins.py` adds or resets a login, add a new
-   secret version and redeploy (or restart) the service.
-2. **Permission to run the ingest job** for the Refresh data button — on that job only:
-   ```bash
-   gcloud run jobs add-iam-policy-binding espn-ingest --region us-west1 \
-     --member=serviceAccount:dashboard-sa@fantasy-dash-emk.iam.gserviceaccount.com \
-     --role=roles/run.invoker
-   ```
+- Sign-in page loads; signing in works; **a reload keeps you signed in**; log out
+  signs you out and a reload stays signed out.
+- Home and all 6 pages render with no errors at phone width and on desktop.
+- **Refresh data** started the real ingest job from the live site, waited for the
+  new data (last update 20:46 → 21:21 UTC on Oct 5) and reloaded with it.
 
-`dashboard-sa` still can't read the ESPN cookie secrets: the Refresh button starts
-the job, and the job runs as `ingest-sa`.
+## GitHub Actions: what each one is for, and what's built
 
-### 3. GitHub Actions: what each one is for, and what's built
-
-None of these is required for the dashboard to work. Everything they do can be done
-by hand with a few commands, which is how the project has run so far. Each one
-automates a step that's easy to forget or get slightly wrong. They're listed by
-how much they matter here.
+None of these is required for the site to work. Everything they do can be done by
+hand with a few commands, which is how the project has run so far. Each one
+automates a step that's easy to forget or get slightly wrong.
 
 | Action | What it does | Why it matters | Status |
 |---|---|---|---|
-| **`ci.yml`** — test on every push | On every push and pull request: lint, formatting check, and all tests on Python 3.12 (the version production runs). No Google Cloud access needed. | Catches broken code within about a minute of pushing it, before it's deployed. Before this, tests only ran when someone remembered to, and only on a laptop running Python 3.14 — not the 3.12 production uses. | **Built** |
-| **Pinned library versions** (`requirements*.txt`) — not an Action, but CI depends on it | Every library is fixed to the exact version the tests passed on. | Without pins, every deploy installs whatever is newest that day, so a library release — or a change to the unofficial `espn-api` — could break the daily data pull with no code change on our side. Pinned, the job keeps running on tested versions; upgrading becomes a deliberate change that CI tests first. | **Done** |
-| `deploy-ingest.yml` — auto-deploy the ingest job | On pushes to `main` that change `ingest/`: run the tests, deploy `espn-ingest`, run it once as a check. | The ingest job was redeployed by hand about ten times in Step 6. The deploy command is easy to get subtly wrong — leaving out one `--set-env-vars` setting silently removes it, since the flag replaces the whole list. Worth it if the ingest code keeps changing. | Not built — stub |
-| `deploy-app.yml` — auto-deploy the dashboard | On pushes to `main` that change `app/`: run the tests, deploy the dashboard, check its health endpoint. | Same as ingest, for the website. Only possible after the first manual deploy below. | Not built — stub |
-| `deploy-views.yml` — keep BigQuery views in sync | On pushes that change `sql/views/`: re-create all 12 views in dependency order. | Stops the views in BigQuery drifting from the files in the repo. Views rarely change once built, so this is low priority. | Not planned |
-| Dependabot — weekly update pull requests | Opens a pull request when a pinned library has a new version; CI tests it. | Keeps pins from going stale without surprises. Mostly useful if `espn-api` ever needs a fix for an ESPN change. | Not planned |
+| **`ci.yml`** — test on every push | On every push and pull request: lint, formatting check, and all tests on Python 3.12 (the version production runs). No Google Cloud access needed. | Catches broken code within about a minute of pushing it. Before this, tests only ran when someone remembered to, and only on a laptop running Python 3.14 — not the 3.12 production uses. | **Built** |
+| **Pinned library versions** (`requirements*.txt`) — not an Action, but CI depends on it | Every library is fixed to the exact version the tests passed on. | Without pins, every deploy installs whatever is newest that day, so a library release — or a change to the unofficial `espn-api` — could break the site or the daily data pull with no code change on our side. Upgrading becomes a deliberate change that CI tests first. | **Done** |
+| `deploy-ingest.yml` — auto-deploy the ingest job | On pushes to `main` that change `ingest/`: test, deploy `espn-ingest`, run it once as a check. | The ingest job was redeployed by hand about ten times. The command is easy to get subtly wrong — leaving out one `--set-env-vars` setting silently removes it. Worth it if the ingest code keeps changing. | Not built — stub |
+| `deploy-app.yml` — auto-deploy the dashboard | On pushes to `main` that change `app/`: test, run the deploy command above, check the health endpoint. | Same, for the website. | Not built — stub |
+| `deploy-views.yml` — keep BigQuery views in sync | On pushes that change `sql/views/`: re-create all 12 views in dependency order. | Stops BigQuery drifting from the repo. Views rarely change, so low priority. | Not planned |
+| Dependabot — weekly update pull requests | Opens a pull request when a pinned library has a new version; CI tests it. | Keeps pins from going stale without surprises. | Not planned |
 
-**What the deploy workflows would need first** (one-time setup, the bulk of the
-work): enable the STS API; a Workload Identity Federation pool and provider that
-only `emosaku/fantasy-dashboard` on `refs/heads/main` can use (the repo is public, so
-this condition is what stops forks and other branches deploying); a
-`github-deployer` service account with only deploy rights; and two GitHub
-repository variables (the provider and the deployer's email — not secrets). GitHub
-then signs in to Google Cloud without any stored key.
+**What the deploy workflows would need first:** enable the STS API; a Workload
+Identity Federation pool and provider only `emosaku/fantasy-dashboard` on
+`refs/heads/main` can use (the repo is public, so this is what stops forks and other
+branches deploying); a `github-deployer` service account with only deploy rights; and
+two GitHub repository variables (not secrets).
 
 **Never automated:** table schema changes (`ALTER TABLE`, applied by hand before
-pushing code that needs them — they're one-way), manager logins and their secret
-(the passwords must never pass through GitHub), and the ESPN cookies.
+pushing code that needs them), manager logins and their secret (passwords must never
+pass through GitHub), and the ESPN cookies.
 
-### 4. Custom domain (optional)
+## Optional next steps
 
-Map a domain you own via Cloud Run domain mapping or a load balancer, instead of
-the default `*.run.app` URL. Not required for the league to use the dashboard.
+- **A custom domain** (e.g. `ourleague.com`, ~$10-20/year). The `run.app` link works
+  the same; a domain is only easier to share and remember. Cloud Run's built-in
+  domain mapping works in some regions only; otherwise Firebase Hosting in front
+  (free at this size).
+- **Stronger passwords.** Every manager currently has the same password, chosen by
+  the commissioner, and usernames follow a predictable pattern. Anyone who learns the
+  address and one manager's name can sign in as them.
+  `python scripts/manage_logins.py --reset-all` issues random ones.
 
 ## Done when
 
-Someone in the league opens the link on their phone and sees today's actual data —
-not a placeholder, not a localhost demo.
-
-## Suggested order
-
-1. Write `app/Dockerfile`, deploy manually with the `gcloud run deploy` command
-   above (plus the logins secret and the two grants), and confirm the live Cloud Run
-   URL lets a manager sign in, renders every page against real BigQuery data, and
-   the Refresh button works (the same "prove it manually first" approach Step 4 used
-   before touching Scheduler or CI/CD).
-2. Optional: if the deploy workflows are wanted, do the one-time Workload Identity
-   Federation setup above, then flesh out the `deploy-{ingest,app}.yml` stubs.
-3. Custom domain only if wanted — it's cosmetic, not blocking.
+Someone in the league opens the link on their phone and sees today's data. **Done**:
+live, signed-in, phone-checked, with the Refresh button working end to end.

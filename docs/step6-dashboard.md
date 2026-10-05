@@ -139,10 +139,12 @@ hands the passwords out.
   (git-ignored, owner-only) for the commissioner to send, then delete.
 - **Lockout:** 5 wrong passwords for a username within 15 minutes lock it for the
   rest of that window, shared across all sessions so reloading doesn't reset it.
-- **Sessions:** signing in lasts for the browser session; a full page reload asks
-  again. **Log out** is in the sidebar.
-- **Step 7:** the deployed service needs the same `secrets.toml`, mounted from
-  Secret Manager.
+- **Stay signed in:** signing in stores a signed 30-day token in a cookie, so a
+  reload (which phones do when you switch back to the browser) doesn't ask again.
+  **Log out** in the sidebar clears it; resetting a password invalidates it.
+- **On the live site** the same `secrets.toml` comes from Secret Manager
+  (`dashboard-logins`); after changing logins, publish a new version — see
+  [Step 7](step7-deploy.md).
 
 ## Implementation details that apply to every page
 
@@ -150,10 +152,11 @@ hands the passwords out.
   `queries.py`; the BigQuery client itself is an `@st.cache_resource`.
 - **Freshness indicator and Refresh data:** the sidebar shows when ingest last wrote
   data (`MAX(ingested_at)` from `teams`), in Arizona time, with a **Refresh data**
-  button that runs the `espn-ingest` Cloud Run Job on demand (`app/refresh.py`),
-  waits for it (about a minute), clears the query cache and reloads. It's disabled
-  for 10 minutes after any update so the shared link can't hammer ESPN. Deployed, the
-  dashboard's service account needs `roles/run.invoker` on the job (Step 7).
+  button that starts the `espn-ingest` Cloud Run Job (`app/refresh.py`), waits until
+  the new data lands in BigQuery (about a minute), clears the query cache and
+  reloads. It's disabled for 10 minutes after any update so the shared link can't
+  hammer ESPN. On the live site, `dashboard-sa` may start that one job and nothing
+  else.
 - **Pre-season and empty states:** every page handles the league's current state —
   one week, all zeros — without errors: Compare says every team is level, Power
   Rankings explains the line chart appears after week 2, the results lens says it
@@ -180,7 +183,7 @@ dark mode (picked from Streamlit's active theme via `st.context.theme`):
 
 ## Verification
 
-- **Unit tests** — 61 in total across `tests/`. For the dashboard:
+- **Unit tests** — 64 in total across `tests/`. For the dashboard:
   - `test_math.py` (9): percentage pooling (1-for-1 plus 40-for-100 = 41/101, not
     70%), season averages, z-scores, head-to-head, per-game trade before/after
   - `test_analysis.py` (16): the spec's checks on a synthetic 4-team league — a
@@ -190,8 +193,9 @@ dark mode (picked from Streamlit's active theme via `st.context.theme`):
     mock trade reproducing every finder row, roster-filling, waiver rules, explanations
   - `test_projection.py` (7): injury defaults, ESPN return dates, adjustable rules,
     finished weeks using actual results, every projected week balancing
-  - `test_auth.py` (7) and `test_refresh.py` (4): hashing, usernames, lockout and
-    expiry; the Refresh button's polling, failure and timeout handling
+  - `test_auth.py` (11) and `test_refresh.py` (3): hashing, usernames, lockout and
+    expiry, stay-signed-in tokens (forgery, expiry, password reset); the Refresh
+    button's start-and-wait and timeout
 - **Every page on live data** — run headlessly with Streamlit's `AppTest` against the
   real BigQuery views, signed in as a manager and as the admin: every page renders
   with no exceptions; a wrong password is refused; a manager is locked to his team;

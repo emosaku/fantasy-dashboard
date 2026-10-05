@@ -29,7 +29,9 @@ st.caption("Category scores are ESPN's. The higher value in each category is bol
 
 def scoreboard(home: int, away: int) -> None:
     h = this_week.loc[this_week["team_id"] == home].iloc[0]
-    if h.actual_result == "T":
+    if h.cat_wins + h.cat_losses + h.cat_ties == 0:  # ESPN hasn't scored it yet
+        st.markdown("Not played yet")
+    elif h.actual_result == "T":
         st.markdown(f"Tied {h.cat_wins}-{h.cat_losses}-{h.cat_ties}")
     else:
         winner = h.team_name if h.actual_result == "W" else h.opponent_name

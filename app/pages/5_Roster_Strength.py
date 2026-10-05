@@ -166,7 +166,11 @@ def category_rankings() -> None:
         )
     )
     unit = "team z (sum of player z-scores)" if lens == "roster" else LABELS[category]
-    bar.update_xaxes(title=unit, zeroline=True)
+    # Room past both ends for the value labels, which sit outside the bars -- without
+    # it they're cut off at the edge, or collide with team names on a phone.
+    low, high = min(float(detail.min()), 0.0), max(float(detail.max()), 0.0)
+    pad = 0.3 * (high - low or 1.0)
+    bar.update_xaxes(title=unit, zeroline=True, range=[low - (pad if low < 0 else 0), high + pad])
     bar.update_layout(bargap=0.25)
     ui.show(ui.style(bar, height=30 * len(detail) + 90))
     if lens == "results":

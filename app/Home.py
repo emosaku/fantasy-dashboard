@@ -73,6 +73,7 @@ PAGE_BLURBS = [
     (PAGES["trade"], "Your best waiver pickups and win-win trades, and a mock-trade simulator."),
 ]
 
+login.sync_cookie()
 if login.current_user() is None:
     st.navigation([st.Page(login.login_page, title="Sign in", icon=":material/login:")]).run()
     st.stop()

@@ -3,9 +3,11 @@ Scheduler runs every morning, and waits for it to finish. Goes alongside the dai
 schedule, not instead of it.
 
 Uses whatever Google credentials the app runs with -- your gcloud login locally, the
-dashboard's service account on Cloud Run (which needs run.jobs.run on the job:
-roles/run.invoker, granted in Step 7). A cooldown after the last update keeps a
-shared, login-free link from hammering ESPN.
+dashboard's service account on Cloud Run, which needs only run.jobs.run on that one
+job (roles/run.invoker). It doesn't watch the job itself -- that would need
+run.operations.get, grantable only project-wide -- but waits for the data: ingest
+writes league_status last, so a newer timestamp there means the whole refresh has
+landed. A cooldown after the last update keeps the shared link from hammering ESPN.
 """
 
 import datetime as dt
@@ -38,22 +40,22 @@ def _session() -> AuthorizedSession:
     return AuthorizedSession(credentials)
 
 
-def run_ingest(session=None, poll_seconds: float = 5, timeout_seconds: float = 600) -> None:
-    """Start the ingest job and block until it finishes. Raises RuntimeError if the
-    run fails or takes longer than timeout_seconds."""
+def run_ingest(
+    finished, session=None, poll_seconds: float = 5, timeout_seconds: float = 600
+) -> None:
+    """Start the ingest job, then block until finished() returns True (the new data
+    has landed). Raises RuntimeError if it hasn't within timeout_seconds -- the job
+    may still finish later; a failed run triggers the ingest failure alert."""
     session = session or _session()
     url = f"{RUN_API}/projects/{PROJECT}/locations/{REGION}/jobs/{JOB}:run"
     response = session.post(url, json={})
     response.raise_for_status()
-    operation = response.json()
 
     deadline = time.monotonic() + timeout_seconds
-    while not operation.get("done"):
+    while not finished():
         if time.monotonic() > deadline:
-            raise RuntimeError("The refresh is taking longer than expected; try again later.")
+            raise RuntimeError(
+                "The refresh is taking longer than expected. The data will update when "
+                "it finishes; check back in a few minutes."
+            )
         time.sleep(poll_seconds)
-        response = session.get(f"{RUN_API}/{operation['name']}")
-        response.raise_for_status()
-        operation = response.json()
-    if "error" in operation:
-        raise RuntimeError(operation["error"].get("message", "The refresh failed."))
