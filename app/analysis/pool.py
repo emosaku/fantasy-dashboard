@@ -45,3 +45,27 @@ def team_totals(players: pd.DataFrame) -> pd.DataFrame:
     totals = active.groupby("team_id")[cat_cols(players)].sum()
     totals.index = totals.index.astype(int)
     return totals
+
+
+def empty_slot_z(z_long: pd.DataFrame) -> pd.Series:
+    """The z an empty roster spot would get in each category, for one raw stat window.
+
+    z = 0 is the average pool player, not an empty spot. An empty spot scores 0 (no
+    counting stats, and a ratio impact of 0 since it takes no attempts), so its z is
+    (0 - mean) / sd, with the mean and spread the same as sql/views/07_v_player_z.sql:
+    over the whole pool, ratios scored as num - pool_rate x den, lower-is-better
+    flipped. Needed whenever a move changes roster size, or an open spot would look
+    as good as an average player."""
+    out = {}
+    for cat, rows in z_long.groupby("category"):
+        num, den = rows["num"].fillna(0), rows["den"].fillna(0)
+        if rows["kind"].iloc[0] == "ratio":
+            rate = num.sum() / den.sum() if den.sum() else 0.0
+            score = np.where(den > 0, num - rate * den, 0.0)
+        else:
+            score = num.to_numpy()
+        if rows["lower_is_better"].iloc[0]:
+            score = -score
+        sd = score.std()  # population, like STDDEV_POP
+        out[cat] = -score.mean() / sd if sd > 0 else 0.0
+    return pd.Series(out, dtype=float)

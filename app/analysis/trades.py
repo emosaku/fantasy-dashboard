@@ -49,6 +49,13 @@ def present(player_id) -> bool:
     return player_id is not None and not pd.isna(player_id)
 
 
+def as_ids(players) -> list:
+    """A roster move as a list of player ids: None/NaN (nobody), one id, or several."""
+    if players is None or isinstance(players, (int, float, np.integer, np.floating)):
+        return [players] if present(players) else []
+    return [p for p in players if present(p)]
+
+
 def best_pickup(players: pd.DataFrame, weights: pd.DataFrame):
     """The free agent (not OUT) worth the most to a team, or None."""
     pool = players.loc[players["is_free_agent"] & (players["injury_status"] != "OUT")]
@@ -68,17 +75,22 @@ def apply_trade(
     their_drop=None,
     my_add=None,
     their_add=None,
+    empty=None,
 ) -> pd.DataFrame:
     """Team totals after a deal. them=None means the free-agent pool (a waiver move:
     `give` are drops, `get` are pickups); only my row changes then. *_drop / *_add
-    are the roster-size moves that go with the deal."""
+    are the add/drop moves that go with the deal: each one player id, None, or a list
+    of ids (my side can add and drop several free agents around a trade).
+    empty: the z of an empty roster spot (pool.empty_slot_z). Given, a side left with
+    fewer players than it started with is charged an empty spot for each one short --
+    otherwise an open spot counts as an average player."""
 
     def moved(ids_out, ids_in, drop, add):
-        delta = contribution(players, ids_in) - contribution(players, ids_out)
-        if present(drop):
-            delta = delta - contribution(players, [drop])
-        if present(add):
-            delta = delta + contribution(players, [add])
+        ins, outs = [*ids_in, *as_ids(add)], [*ids_out, *as_ids(drop)]
+        delta = contribution(players, ins) - contribution(players, outs)
+        short = len(outs) - len(ins)
+        if empty is not None and short > 0:
+            delta = delta + short * empty.reindex(totals.columns).fillna(0).to_numpy()
         return delta
 
     after = totals.copy()
@@ -101,10 +113,11 @@ def simulate_trade(
     their_add=None,
     punts_me=(),
     punts_them=(),
+    empty=None,
 ) -> tuple[pd.DataFrame, SideResult, SideResult | None]:
     """(totals after, my result, their result or None for a free-agent move)."""
     after = apply_trade(
-        players, totals, me, them, give, get, my_drop, their_drop, my_add, their_add
+        players, totals, me, them, give, get, my_drop, their_drop, my_add, their_add, empty
     )
     mine = _side_delta(totals, after, me, punts_me)
     theirs = None if them is None else _side_delta(totals, after, them, punts_them)

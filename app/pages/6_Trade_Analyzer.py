@@ -19,8 +19,8 @@ import queries
 import ui
 from analysis.explain import explain
 from analysis.objective import expected_category_wins, matchup_record
-from analysis.trades import present, simulate_trade, top_targets, trade_chips
-from analysis.waivers import rank_waiver_moves
+from analysis.trades import as_ids, present, simulate_trade, top_targets, trade_chips
+from analysis.waivers import rank_pickups, rank_waiver_moves
 from analysis.weights import compute_weights, punts
 from categories import by_key, fmt, keys
 from categories import totals as totals_of
@@ -110,9 +110,9 @@ def load_into_mock(partner, give, get, my_drop=None, their_drop=None, my_add=Non
     st.session_state["mock-partner"] = int(partner)
     st.session_state["mock-give"] = [int(x) for x in give]
     st.session_state["mock-get"] = [int(x) for x in get]
-    st.session_state["mock-my-drop"] = one(my_drop)
+    st.session_state["mock-my-drop"] = [int(x) for x in as_ids(my_drop)]
     st.session_state["mock-their-drop"] = one(their_drop)
-    st.session_state["mock-my-add"] = one(my_add)
+    st.session_state["mock-my-add"] = [int(x) for x in as_ids(my_add)]
     st.session_state["mock-their-add"] = one(their_add)
     st.toast("Loaded. Open the Mock trade tab to see it.")
 
@@ -309,6 +309,7 @@ def keep_valid(key: str, options: list, multi: bool) -> None:
     if value is None:
         return
     if multi:
+        value = value if isinstance(value, list) else [value]
         st.session_state[key] = [v for v in value if v in options]
     elif value not in options:
         st.session_state[key] = None
@@ -364,33 +365,55 @@ with mock_tab:
         "You add" if is_waiver else "You get", their_ids, format_func=label, key="mock-get"
     )
 
-    with st.expander("Roster moves to keep rosters full"):
-        r1, r2 = st.columns(2)
-        my_drop_opts = [None, *[i for i in my_ids if i not in give]]
-        my_add_opts = [None, *[i for i in fa_ids if i not in get]]
-        keep_valid("mock-my-drop", my_drop_opts, multi=False)
-        keep_valid("mock-my-add", my_add_opts, multi=False)
-        my_drop = r1.selectbox("You also drop", my_drop_opts, format_func=label, key="mock-my-drop")
-        my_add = r1.selectbox("You also pick up", my_add_opts, format_func=label, key="mock-my-add")
-        their_drop = their_add = None
-        if not is_waiver:
+    # --- Your other moves: free agents added and players dropped around the deal ---
+    st.markdown("**Your other moves**")
+    m1, m2 = st.columns(2)
+    my_add_opts = [i for i in fa_ids if i not in get]
+    my_drop_opts = [i for i in my_ids if i not in give]
+    keep_valid("mock-my-add", my_add_opts, multi=True)
+    keep_valid("mock-my-drop", my_drop_opts, multi=True)
+    my_add = m1.multiselect("Add free agents", my_add_opts, format_func=label, key="mock-my-add")
+    my_drop = m2.multiselect("Drop players", my_drop_opts, format_func=label, key="mock-my-drop")
+
+    their_drop = their_add = None
+    if not is_waiver:
+        with st.expander(f"{team_label(partner)}'s roster moves (optional)"):
+            r1, r2 = st.columns(2)
             their_drop_opts = [None, *[i for i in their_ids if i not in get]]
-            their_add_opts = [None, *[i for i in fa_ids if i != my_add]]
+            their_add_opts = [None, *[i for i in fa_ids if i not in my_add]]
             keep_valid("mock-their-drop", their_drop_opts, multi=False)
             keep_valid("mock-their-add", their_add_opts, multi=False)
-            their_drop = r2.selectbox(
+            their_drop = r1.selectbox(
                 "They also drop", their_drop_opts, format_func=label, key="mock-their-drop"
             )
             their_add = r2.selectbox(
                 "They also pick up", their_add_opts, format_func=label, key="mock-their-add"
             )
 
-    if not give and not get:
+    # Roster after the whole move (in waiver mode `give` are drops and `get` adds).
+    roster_after = [
+        *[i for i in my_ids if i not in give and i not in my_drop],
+        *get,
+        *my_add,
+    ]
+    size_now, size_after = len(my_ids), len(roster_after)
+    if size_after == size_now:
+        st.caption(f"Your roster: {size_now} players before and after. ✓")
+    else:
+        fix = (
+            f"drop {size_after - size_now} more"
+            if size_after > size_now
+            else f"add {size_now - size_after} more"
+        )
+        st.caption(f"Your roster: {size_now} → {size_after} players. To stay at {size_now}, {fix}.")
+
+    if not give and not get and not my_add and not my_drop:
         st.info("Pick players to see the result.")
         st.stop()
 
     them = None if is_waiver else partner
     punts_them = () if is_waiver else punts(weights[partner])
+    empty = analyzer.empty_slot(ctx.league_id, ctx.version, window)
     after, mine, theirs = simulate_trade(
         players,
         totals,
@@ -404,13 +427,92 @@ with mock_tab:
         their_add,
         punts_me,
         punts_them,
+        empty,
     )
+
+    # --- Suggest a pickup, for the roster this move leaves you ---
+    def add_suggestion(add_id, drop_id) -> None:
+        """Button callback: put a suggested add (and drop) into the move."""
+        st.session_state["mock-my-add"] = [*st.session_state.get("mock-my-add", []), add_id]
+        if present(drop_id):
+            st.session_state["mock-my-drop"] = [
+                *st.session_state.get("mock-my-drop", []),
+                int(drop_id),
+            ]
+
+    open_spot = size_after < size_now
+    if st.button(
+        "Suggest a pickup",
+        icon=":material/person_add:",
+        help="Free agents ranked by what they add to your team after this move: a plain "
+        "add if the move leaves a roster spot open, otherwise an add-and-drop.",
+    ):
+        st.session_state["mock-suggest"] = True
+    if st.session_state.get("mock-suggest"):
+        picks = rank_pickups(
+            players,
+            after,
+            me,
+            w_me,  # your strategy, not one recomputed from a half-finished roster
+            [i for i in my_ids if i not in give and i not in my_drop],  # never one just received
+            exclude=[*get, *my_add, *as_ids(their_add)],
+            add_only=open_spot,
+            top=5,
+            empty=empty,
+        )
+        with st.container(border=True):
+            head, hide = st.columns([4, 1])
+            head.markdown(
+                "**Best pickups after this move**"
+                + (" (you have an open roster spot)" if open_spot else "")
+            )
+            if hide.button("Hide", key="mock-suggest-hide"):
+                st.session_state["mock-suggest"] = False
+                st.rerun()
+            if picks.empty:
+                st.caption("No free agent helps here.")
+            for i, pick in picks.iterrows():
+                text = f"Add **{pick['add_name']}**"
+                if present(pick["drop_id"]):
+                    text += f" · drop **{pick['drop_name']}**"
+                text += f": {pick['dE']:+g} category wins"
+                if pd.notna(pick["injury_status"]) and pick["injury_status"] != "ACTIVE":
+                    text += f" ({str(pick['injury_status']).replace('_', ' ').lower()})"
+                left, right = st.columns([4, 1])
+                left.markdown(text)
+                left.caption(explain(cat_deltas(pick)))
+                right.button(
+                    "Add to move",
+                    key=f"mock-suggest-{i}",
+                    on_click=add_suggestion,
+                    args=(int(pick["add_id"]), pick["drop_id"]),
+                )
+
+    # --- What the trade does on its own, and with your other moves ---
+    if (give or get) and (my_add or my_drop):
+        trade_only, _, _ = simulate_trade(
+            players, totals, me, them, give, get, None, their_drop, None, their_add, empty=empty
+        )
+        stages = [("Now", totals), ("Trade only", trade_only), ("Trade + your moves", after)]
+        e_now = expected_category_wins(totals, me, punts_me)
+        rows = []
+        for name, state in stages:
+            e = expected_category_wins(state, me, punts_me)
+            rows.append(
+                {
+                    "": name,
+                    "Category wins (E)": f"{e:g}" + ("" if name == "Now" else f" ({e - e_now:+g})"),
+                    "Matchup record": "-".join(map(str, matchup_record(state, me))),
+                }
+            )
+        st.markdown("**Step by step**")
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
     st.subheader("Players in this deal")
     moves = [(pid, "You drop" if is_waiver else "You send") for pid in give]
     moves += [(pid, "You add" if is_waiver else "You get") for pid in get]
-    moves += [(pid, "You also drop") for pid in [my_drop] if pid]
-    moves += [(pid, "You pick up") for pid in [my_add] if pid]
+    moves += [(pid, "You also drop") for pid in my_drop]
+    moves += [(pid, "You pick up") for pid in my_add]
     moves += [(pid, "They drop") for pid in [their_drop] if pid]
     moves += [(pid, "They pick up") for pid in [their_add] if pid]
     profile = queries.player_profile(ctx.league_id, ctx.version).set_index("player_id")
@@ -576,8 +678,8 @@ with mock_tab:
         st.caption("Per-game roster totals, IR excluded. ▲ is better in every category.")
         p1, p2 = st.columns(2)
         with p1:
-            mine_out = [*give, *([my_drop] if my_drop else [])]
-            mine_in = [*get, *([my_add] if my_add else [])]
+            mine_out = [*give, *my_drop]
+            mine_in = [*get, *my_add]
             per_game(me, mine_out, mine_in)
         if not is_waiver:
             with p2:
