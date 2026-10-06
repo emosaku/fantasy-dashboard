@@ -5,17 +5,17 @@ A category's weight for team t is how many opponents a realistic change of delta
   U = opponents whose total is in (T, T + delta]  -- teams you'd pass with a gain
   D = opponents whose total is in [T - delta, T)  -- teams that would pass you
   raw weight = (U + 0.5 D) / (N - 1)
-Gains count fully and losses half, because the analyzer looks for upgrades. The 9
-weights are then scaled to sum to 9 (average 1.0).
+Gains count fully and losses half, because the analyzer looks for upgrades. The
+league's K weights are then scaled to sum to K (average 1.0).
 
 Tiers: Lock = top 3 with D = 0; Punt = bottom 3 with U = 0 (weight 0); Swing = the
-rest. "Top/bottom 3" is ranks 1-3 / 12-14 in this 14-team league. A user override
+rest. "Bottom 3" is the last three ranks, whatever the league size. A user override
 (Lock / Swing / Punt) replaces the raw weight with 0.5 / 1.5 / 0 before scaling.
 """
 
 import pandas as pd
 
-from categories import COLUMNS
+from analysis.pool import cat_cols
 
 OVERRIDE_WEIGHTS = {"Lock": 0.5, "Swing": 1.5, "Punt": 0.0}
 TIERS = ["Lock", "Swing", "Punt"]
@@ -27,14 +27,15 @@ def compute_weights(
     """One row per category: total, rank, gap_above, gap_below, U, D, auto_tier,
     tier (after overrides), weight. overrides maps category -> "Auto"/"Lock"/...."""
     n = len(totals)
-    me = totals.loc[team_id, COLUMNS]
-    diff = totals.drop(team_id)[COLUMNS] - me  # each opponent's total minus mine
+    cols = list(totals.columns)
+    me = totals.loc[team_id, cols]
+    diff = totals.drop(team_id)[cols] - me  # each opponent's total minus mine
 
     up = ((diff > 0) & (diff <= delta)).sum()
     down = ((diff < 0) & (diff >= -delta)).sum()
-    rank = totals[COLUMNS].rank(ascending=False, method="min").loc[team_id].astype(int)
+    rank = totals[cols].rank(ascending=False, method="min").loc[team_id].astype(int)
 
-    auto_tier = pd.Series("Swing", index=COLUMNS)
+    auto_tier = pd.Series("Swing", index=cols)
     auto_tier[(rank <= 3) & (down == 0)] = "Lock"
     auto_tier[(rank >= n - 2) & (up == 0)] = "Punt"
 
@@ -47,9 +48,9 @@ def compute_weights(
             raw[category] = OVERRIDE_WEIGHTS[choice]
 
     if raw.sum() > 0:
-        weight = raw * len(COLUMNS) / raw.sum()
+        weight = raw * len(cols) / raw.sum()
     else:  # nothing is within reach anywhere: fall back to equal weights
-        weight = pd.Series(1.0, index=COLUMNS)
+        weight = pd.Series(1.0, index=cols)
         weight[tier == "Punt"] = 0.0
 
     return pd.DataFrame(
@@ -73,9 +74,10 @@ def punts(weights: pd.DataFrame) -> list[str]:
 
 def player_values(players: pd.DataFrame, weights: pd.DataFrame) -> pd.Series:
     """v_t(p): each player's z-scores weighted by team t's category weights."""
-    return players[COLUMNS] @ weights.loc[COLUMNS, "weight"]
+    cols = list(weights.index)
+    return players[cols] @ weights.loc[cols, "weight"]
 
 
 def generic_values(players: pd.DataFrame) -> pd.Series:
     """Unweighted total z -- the same for every team; used for fairness checks."""
-    return players[COLUMNS].sum(axis=1)
+    return players[cat_cols(players)].sum(axis=1)

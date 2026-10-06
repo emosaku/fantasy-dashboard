@@ -11,8 +11,7 @@ from analysis.pool import team_totals
 from analysis.trades import find_trades, simulate_trade
 from analysis.waivers import rank_waiver_moves
 from analysis.weights import compute_weights, punts
-from categories import COLUMNS
-from tests.fixtures.four_team_league import build_players
+from tests.fixtures.four_team_league import COLUMNS, build_players
 
 
 @pytest.fixture
@@ -36,14 +35,14 @@ def test_totals_leave_out_ir_and_free_agents(players, totals):
 
 
 def test_runaway_leader_gets_d_zero_and_lock(totals):
-    blk = compute_weights(totals, 1).loc["blk"]
+    blk = compute_weights(totals, 1).loc["BLK"]
     assert blk["rank"] == 1
     assert blk["down"] == 0
     assert blk["tier"] == "Lock"
 
 
 def test_team_trailing_by_more_than_delta_gets_u_zero_and_punt(totals):
-    ast = compute_weights(totals, 4).loc["ast"]
+    ast = compute_weights(totals, 4).loc["AST"]
     assert ast["rank"] == 4
     assert ast["up"] == 0
     assert ast["tier"] == "Punt"
@@ -55,25 +54,25 @@ def test_weights_average_one(totals):
 
 
 def test_punting_zeroes_the_weight_and_drops_it_from_e(totals):
-    weights = compute_weights(totals, 2, overrides={"pts": "Punt"})
-    assert weights.loc["pts", "weight"] == 0
-    assert weights.loc["pts", "tier"] == "Punt"
+    weights = compute_weights(totals, 2, overrides={"PTS": "Punt"})
+    assert weights.loc["PTS", "weight"] == 0
+    assert weights.loc["PTS", "tier"] == "Punt"
     with_pts = expected_category_wins(totals, 2)
     without = expected_category_wins(totals, 2, punts(weights))
-    pts_wins = expected_category_wins(totals, 2) - expected_category_wins(totals, 2, ["pts"])
+    pts_wins = expected_category_wins(totals, 2) - expected_category_wins(totals, 2, ["PTS"])
     assert without == pytest.approx(with_pts - pts_wins - _other_punts(weights, totals, 2))
 
 
 def _other_punts(weights, totals, team):
-    others = [c for c in punts(weights) if c != "pts"]
+    others = [c for c in punts(weights) if c != "PTS"]
     return expected_category_wins(totals, team) - expected_category_wins(totals, team, others)
 
 
 def test_overrides_set_pre_scaling_weights(totals):
-    weights = compute_weights(totals, 2, overrides={c: "Swing" for c in COLUMNS} | {"reb": "Lock"})
+    weights = compute_weights(totals, 2, overrides={c: "Swing" for c in COLUMNS} | {"REB": "Lock"})
     # 8 Swing at 1.5 and 1 Lock at 0.5, scaled to sum to 9.
-    assert weights.loc["reb", "weight"] == pytest.approx(0.5 * 9 / 12.5)
-    assert weights.loc["pts", "weight"] == pytest.approx(1.5 * 9 / 12.5)
+    assert weights.loc["REB", "weight"] == pytest.approx(0.5 * 9 / 12.5)
+    assert weights.loc["PTS", "weight"] == pytest.approx(1.5 * 9 / 12.5)
 
 
 def test_e_is_symmetric(totals):
@@ -92,10 +91,10 @@ def test_trade_inside_a_punt_category_changes_nothing_for_that_team(players, tot
     # AST, and swap them: for team 4 only AST moves, so its E can't change.
     players = players.copy()
     players.loc[20, COLUMNS] = players.loc[40, COLUMNS]
-    players.loc[20, "ast"] = players.loc[40, "ast"] + 2.0
+    players.loc[20, "AST"] = players.loc[40, "AST"] + 2.0
     totals = team_totals(players)
     punts_4 = punts(compute_weights(totals, 4))
-    assert "ast" in punts_4
+    assert "AST" in punts_4
 
     _, team4, _ = simulate_trade(players, totals, 4, 2, give=[40], get=[20], punts_me=punts_4)
     assert team4.delta_e == 0
@@ -171,6 +170,6 @@ def test_waiver_delta_matches_a_simulated_move(players, totals):
 
 
 def test_explanation_counts_gains_and_losses():
-    text = explain(pd.Series({"blk": 2.0, "fg_pct": 1.0, "fg3m": -1.0}))
+    text = explain(pd.Series({"BLK": 2.0, "FG%": 1.0, "3PM": -1.0}))
     assert text == "+2 category wins: passes 2 teams in BLK, 1 in FG%; costs 1 team in 3PM."
     assert explain({}) == "No change in category wins."

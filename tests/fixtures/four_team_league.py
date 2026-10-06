@@ -11,7 +11,9 @@ Everything else is small seeded noise, so totals are realistic but reproducible.
 import numpy as np
 import pandas as pd
 
-from categories import COLUMNS
+from categories import NINE_CAT_NO_TO, keys
+
+COLUMNS = keys(NINE_CAT_NO_TO)
 
 
 def build_players() -> pd.DataFrame:
@@ -22,9 +24,9 @@ def build_players() -> pd.DataFrame:
             pid = team * 10 + k
             z = dict(zip(COLUMNS, rng.normal(0, 0.4, len(COLUMNS)), strict=True))
             if team == 1:
-                z["blk"] += 1.5
+                z["BLK"] += 1.5
             if team == 4:
-                z["ast"] -= 1.5
+                z["AST"] -= 1.5
             rows.append(
                 {
                     "player_id": pid,
@@ -40,7 +42,7 @@ def build_players() -> pd.DataFrame:
     for pid, status in ((101, "ACTIVE"), (102, "OUT"), (103, "ACTIVE")):
         z = dict(zip(COLUMNS, rng.normal(0, 0.3, len(COLUMNS)), strict=True))
         if pid == 103:
-            z = {c: 0.4 for c in COLUMNS} | {"stl": 2.5}
+            z = {c: 0.4 for c in COLUMNS} | {"STL": 2.5}
         if pid == 102:
             z = {c: 3.0 for c in COLUMNS}  # best player in the pool -- but OUT
         rows.append(

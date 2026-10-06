@@ -1,18 +1,20 @@
-"""Transactions page (Step 6): every activity this season -- adds, drops, trades and
+"""Transactions page: every activity this season -- adds, drops, trades and
 lineup moves. One filter bar (dates, team, action, player) drives both the
 activity-per-team bar chart and the activity log, which lists every matching row.
-Reads v_transactions.
+Reads m_transactions.
 """
 
 import plotly.graph_objects as go
 import streamlit as st
 
+import league
 import queries
 import ui
 
 st.title("Transactions")
+ctx = league.current()
 
-txns = queries.transactions()
+txns = queries.transactions(ctx.league_id, ctx.version)
 if txns.empty:
     st.info("No activity yet this season.")
     st.stop()
@@ -32,7 +34,7 @@ TYPE_LABELS = {
     "OTHER": "Other",
 }
 
-txns = txns.assign(day=txns["txn_date"].dt.tz_convert(ui.LEAGUE_TZ).dt.date)
+txns = txns.assign(day=txns["txn_date"].dt.tz_convert(ui.viewer_tz()).dt.date)
 first, last = txns["day"].min(), txns["day"].max()
 
 f1, f2 = st.columns(2)
@@ -122,14 +124,14 @@ ui.show(ui.style(fig, height=max(240, 30 * len(counts) + 100)))
 
 st.subheader("Activity log")
 log = shown.sort_values("txn_date", ascending=False).assign(
-    when=lambda d: d["txn_date"].dt.tz_convert(ui.LEAGUE_TZ).dt.strftime("%b %-d, %-I:%M %p"),
+    when=lambda d: d["txn_date"].dt.tz_convert(ui.viewer_tz()).dt.strftime("%b %-d, %-I:%M %p"),
     action_label=lambda d: d["action"].map(lambda a: ACTION_LABELS.get(a, a.title())),
     detail=lambda d: d["detail"].fillna(""),  # only lineup moves have details
 )
 st.dataframe(
     log[["when", "team_name", "action_label", "player_name", "detail"]],
     column_config={
-        "when": "When (AZ)",
+        "when": "When",
         "team_name": "Team",
         "action_label": "Action",
         "player_name": "Player",

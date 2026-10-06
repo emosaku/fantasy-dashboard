@@ -1,170 +1,88 @@
-# Fantasy Basketball Dashboard
+# League Lab
 
-## Overview
+> **Branch `multi-league`.** This branch turns the single-league dashboard into
+> **League Lab**: the same analysis for any public ESPN head-to-head categories
+> fantasy basketball league, with Google sign-in, invite links, per-league data and
+> near-zero running cost. It's a separate site in its own Google Cloud project
+> (`league-lab-emk`). The original league's site stays on `main`, untouched; branch
+> `InitialSingleLeagueBuild` is a snapshot of `main` from before this work began.
 
-A dashboard for a private 14-team ESPN fantasy basketball league, fed by a daily
-pipeline on Google Cloud. Each manager signs in with their own login; data refreshes
-automatically every morning (or on demand); every view is backed by BigQuery history
-ESPN itself doesn't keep (ESPN's own UI doesn't retain all-play records, category
-breakdowns over time, or a queryable activity log).
+## What it does
 
-The league is head-to-head **Most Categories** with 9 categories: FG%, FT%, 3PM, 3PT%,
-REB, AST, STL, BLK, PTS (no turnovers), and a 16-week regular season.
+A commissioner signs in with Google, registers a public league from its ESPN link,
+and shares an invite link; members join and claim their team. Every league gets:
 
-What the dashboard does:
+- **Compare**: any two teams, category by category, for a week or the season
+- **Power Rankings**: all-play rankings, plus an injury-aware projected finish
+- **Matchups and Luck**: every scoreboard, and who's winning more than their stats say
+- **Transactions**: every add, drop, trade and lineup move, filterable
+- **Roster Strength**: every team ranked in every category, with Lock / Swing / Punt tiers
+- **Trade Analyzer**: waiver moves and win-win trades for your own team, and a mock trade
+- **Player Rankings**: every player ranked in every category and overall
 
-- **Compare** — any two teams, category by category, for a week or the season
-- **Power Rankings** — all-play rankings (your record if you'd played everyone every
-  week), plus an injury-aware projected finish through the end of the regular season
-- **Matchups and Luck** — every week's scoreboards, and who's winning more (or less)
-  than their stats say
-- **Transactions** — every add, drop, trade and lineup move, filterable by date, team,
-  action and player
-- **Roster Strength** — category rankings 1-14 for every team (roster strength or
-  actual results), with Lock / Swing / Punt tiers, and per-game totals
-- **Trade Analyzer** — for the signed-in manager's team: waiver pickups and win-win
-  trades ranked by category wins gained, with plain-text explanations, and a mock-trade
-  simulator showing health and games-played history for every player in the deal
-- **Player Rankings** — every player, rostered or free agent, ranked in each category
-  and overall, shaded like the team rankings, with team, position and health filters
+Scoring rules are read from each league: any category set (turnovers count lower-is-
+better; FG%, FT%, 3PT% and A/TO are ratios), Most Categories or Each Category.
 
-The original build plan, and every feature added since, lives in
-[`docs/proposal.md`](docs/proposal.md).
+## Docs
+
+| | |
+|---|---|
+| [docs/multiLeagueDocs/plan.md](docs/multiLeagueDocs/plan.md) | Decisions and the phased plan |
+| [docs/multiLeagueDocs/phase0.md](docs/multiLeagueDocs/phase0.md) | Phase 0: the project, guardrails, config |
+| [docs/multiLeagueDocs/killswitch.md](docs/multiLeagueDocs/killswitch.md) | Budget kill switch runbook |
+| [docs/multiLeagueDocs/phase1.md](docs/multiLeagueDocs/phase1.md) | Phase 1: tenancy, generic scoring, ingest fan-out, sign-in, ops, load test, cost, what's left |
+| [docs/initialSingleLeagueBuildDocs/](docs/initialSingleLeagueBuildDocs/) | The original single-league build |
 
 ## Architecture
 
 ```
-Cloud Scheduler (daily, 5 AM Arizona)      "Refresh data" button (on demand)
-        │                                          │
-        ▼                                          ▼
-Cloud Run Job: espn-ingest  ──reads cookies──  Secret Manager (espn_s2, SWID)
-        │
-        │  ESPN Fantasy API (espn-api + ESPN's raw feeds for activity and player info)
-        ▼
-BigQuery: fantasy dataset (9 raw tables + 12 analytics views)
-        │
-        ▼
-Cloud Run service fantasy-dash: Streamlit app (8 pages, cached reads, manager logins)
-        │
-        ▼
-League managers (one link, any device, own username and password)
+Browser ──Google sign-in──▶ Cloud Run `league-lab` (Streamlit) ──▶ Firestore (users, leagues, members)
+                                    │ reads m_* tables for one league
+Cloud Scheduler (daily) ──▶ Cloud Run Job `league-ingest` (parallel tasks) ──▶ ESPN (public leagues)
+                                    ▼
+                     BigQuery `league_lab`: raw tables ─▶ views ─▶ m_* tables
+Budget $5/month ──▶ Pub/Sub ──▶ `killswitch` function (pauses schedule, closes site)
 ```
 
-Credentials never leave the ingest side — `ingest-sa` can write BigQuery and read the
-ESPN secrets; `dashboard-sa` (the dashboard's identity) reads BigQuery and, from Step 7,
-can start the ingest job (on that job only) for the Refresh button. GitHub Actions runs
-the tests on every push; deploys are a single `gcloud` command each.
+## Setup (local)
 
-## Step roadmap
-
-| Step | Description | Status |
-|---|---|---|
-| 0 | Project scaffolding, tooling, environment | **Complete** |
-| 1 | Prerequisites — GCP project, APIs, service accounts, league ID, ESPN cookies | **Complete** |
-| 2 | Local data access — prove `espn-api` can pull every dataset the features need | **Complete** |
-| 3 | BigQuery data model — raw tables (long format, makes/attempts not percentages) | **Complete** |
-| 4 | Ingest job — containerized Cloud Run Job, staging + `MERGE` for idempotency | **Complete** |
-| 5 | Analytics layer — BigQuery views (all-play, rankings, luck, z-scores, category ranks) | **Complete** |
-| 6 | Streamlit dashboard — 8 pages, logins, recommendations, phone-friendly | **Complete** |
-| 7 | Deploy and share — Cloud Run service, CI, one link for the league | **Complete** |
-
-## Current state
-
-Every step is done: the ingest job, BigQuery tables and views, and the dashboard are
-all live on Google Cloud. The dashboard runs on Cloud Run as `fantasy-dash` (its
-address isn't in this public repo — see [`docs/step7-deploy.md`](docs/step7-deploy.md)),
-works on phones and desktops, and keeps managers signed in for 30 days. How it was
-built, in plain language: [How the league website was built](https://claude.ai/code/artifact/de41d72f-b068-4fb9-ba28-da3f14d43773). It also runs
-locally with `streamlit run app/Home.py` from the repo root.
-
-- `fantasy-dash-emk` is a real GCP project — billing linked, $5/month budget alert,
-  the required APIs enabled. `ingest-sa`/`dashboard-sa` service accounts exist with
-  least-privilege IAM; `espn-s2`/`espn-swid` live in Secret Manager.
-- The `fantasy` BigQuery dataset has 9 raw tables (`sql/ddl/*.sql`): `teams`,
-  `matchup_categories`, `rosters`, `player_stats`, `transactions`, `free_agents`,
-  `league_status`, `player_seasons`, `player_details` — all filled from the live league.
-- `ingest/` is a deployed Cloud Run Job (`espn-ingest`). Each run pulls the league from
-  ESPN and `MERGE`s it into BigQuery; same-day snapshots are replaced, never duplicated.
-  Cloud Scheduler (`espn-ingest-daily`, 5 AM `America/Phoenix`) runs it daily and a
-  Cloud Monitoring alert fires on failures. See
-  [`docs/step4-ingest.md`](docs/step4-ingest.md).
-- `sql/views/*.sql` — 12 analytics views, live in the `fantasy` dataset. See
-  [`docs/step5-analytics.md`](docs/step5-analytics.md).
-- `app/` — the Streamlit dashboard, behind manager logins created with
-  `python scripts/manage_logins.py`. See [`docs/step6-dashboard.md`](docs/step6-dashboard.md).
-- `tests/` — 67 tests: the ingest transforms and MERGE statement, the dashboard's math,
-  the trade/waiver analyzer (on a synthetic 4-team league), the season projection,
-  logins, and the refresh button.
-- `.github/workflows/ci.yml` — lint, formatting and all tests on Python 3.12 on every
-  push and pull request. Library versions are pinned in `requirements*.txt`.
-  `deploy-{ingest,app}.yml` are manual-only stubs; why each Action matters, and
-  which are worth building, is in [`docs/step7-deploy.md`](docs/step7-deploy.md).
-
-## Setup
-
-Requires Python 3.12+.
+Requires Python 3.12+ and `gcloud auth application-default login` with access to
+`league-lab-emk`.
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt -r requirements-dev.txt
-
-cp .env.example .env   # fill in LEAGUE_ID/SEASON/ESPN_S2/SWID/GCP_PROJECT_ID
-gcloud auth application-default login   # BigQuery and the Refresh button use this
-
-python scripts/manage_logins.py   # once: creates the manager logins (see step7-deploy.md
-                                  # for publishing them to the live site)
-streamlit run app/Home.py         # from the repo root
+cp .env.example .env   # GCP_PROJECT_ID=league-lab-emk, and DEV_AUTH_EMAIL=<you> to
+                       # sign in locally without Google (ignored on Cloud Run)
+streamlit run app/Home.py   # from the repo root
 pytest
 ```
-
-## Tech stack
-
-- Python 3.12+
-- `espn-api`, `requests`, `pandas` — pulling and shaping league data
-- `google-cloud-bigquery` — loading and querying
-- `streamlit`, `plotly`, `numpy` — the dashboard and its analysis
-- `python-dotenv` — local env var loading
-- `pytest`, `ruff` — testing and linting
-- GCP: Cloud Run, Cloud Scheduler, BigQuery, Secret Manager, Artifact Registry, Cloud
-  Build, Cloud Monitoring — see [`docs/gcp-services.md`](docs/gcp-services.md)
 
 ## Project layout
 
 ```
-FantasyDashboard/
-├── ingest/                    # Cloud Run Job: ESPN -> BigQuery (deployed)
-│   ├── main.py                  # pulls every source, MERGEs each table
-│   ├── espn_client.py           # espn_api League + raw ESPN player-info fetch (any season)
-│   ├── transform.py             # ESPN objects/records -> DataFrames matching sql/ddl/
-│   ├── bigquery_load.py         # staging table + MERGE; daily snapshots replaced in full
-│   ├── Dockerfile
-│   └── requirements.txt         # lean subset for the deployed image
-├── sql/
-│   ├── ddl/                     # 9 raw tables (live in BigQuery)
-│   └── views/                   # 12 analytics views (live in BigQuery)
-├── Dockerfile, .gcloudignore    # the dashboard's image; what may be uploaded to build it
-├── app/                         # Streamlit dashboard
-│   ├── Home.py                  # login gate, navigation, standings
-│   ├── pages/                   # the 7 feature pages
-│   ├── queries.py               # the only place SQL lives; every read cached 1 hour
-│   ├── analysis/                # trade/waiver analyzer + season projection (pure, tested)
-│   ├── analyzer.py              # cached glue between the views and analysis/
-│   ├── auth.py, login.py        # password hashing + lockout; login page and session
-│   ├── refresh.py               # the Refresh data button (runs the ingest job)
-│   ├── categories.py, compare.py, trade.py, ui.py
-├── scripts/manage_logins.py     # create / reset manager logins
-├── notebooks/                   # Step 2: one-off ESPN API exploration
-├── tests/                       # mirrors ingest/ and app/; fixtures/ holds the 4-team league
-├── .github/workflows/           # ci.yml (tests on every push); deploy stubs for Step 7
-├── docs/                        # proposal.md (the plan), step4-7 docs, gcp-apis.md,
-│                                  gcp-services.md
-├── requirements.txt, requirements-dev.txt
-├── pyproject.toml               # ruff + pytest config only
-├── .env.example
-└── README.md
+├── app/                    # Streamlit dashboard
+│   ├── Home.py               # sign-in gate, navigation, league switcher, standings
+│   ├── pages/                # 7 analysis pages + register, join, league settings, privacy
+│   ├── settings.py           # environment config
+│   ├── league.py             # who's signed in, which league, its rules (from Firestore)
+│   ├── tenancy.py            # registry rules: register, invite, join, delete, refresh limit
+│   ├── onboarding.py         # registration checks against ESPN
+│   ├── queries.py            # every BigQuery read (m_* tables, one league per query)
+│   ├── refresh.py            # starts the ingest job (refresh, first load, purge)
+│   ├── categories.py         # generic categories: counts, ratios, direction, formatting
+│   ├── analysis/             # trade/waiver analyzer, rankings, projection (pure, tested)
+│   └── analyzer.py, compare.py, trade.py, ui.py
+├── ingest/                 # Cloud Run Job: ESPN -> BigQuery, per league, fanned out
+│   ├── main.py, registry.py, catalog.py, espn_client.py, transform.py,
+│   └── bigquery_load.py, materialize.py, credentials.py
+├── sql/ddl, sql/views      # templated with {project}/{dataset}
+├── ops/killswitch/         # budget kill switch (Cloud Run function)
+├── scripts/                # apply_sql.py, teardown.py, load_test.py
+├── tests/                  # app, ingest, ops; fixtures (4-team league, fake Firestore)
+└── docs/
 ```
 
-Git-ignored and never committed: `.env` (ESPN cookies), `.streamlit/secrets.toml`
-(login password hashes) and `manager-logins.csv` (plain passwords to hand out).
+Never committed: `.env`, `.streamlit/secrets.toml` (sign-in settings).
+
+League Lab is not affiliated with, endorsed by or sponsored by ESPN or the NBA.

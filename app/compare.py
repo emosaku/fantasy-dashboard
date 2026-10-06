@@ -1,44 +1,53 @@
-"""Compare page math: one stat line per team for a week or the season, z-scored
-across the league. Pure pandas, so it's unit-testable without BigQuery.
+"""Compare page math: one line per team for a week or the season, z-scored across the
+league. Pure pandas, so it's unit-testable without BigQuery.
 
-v_team_week_cats holds raw weekly values; z-scoring them happens here because the
-period being compared (one week, or the season) is a page control, not something a
-view can fix in advance.
+Input is v_team_week_cats (long: team x week x category, with the ratio categories'
+two totals). Comparisons use each category's score (lower-is-better flipped), so a
+team "wins" turnovers by having fewer.
 """
 
 import pandas as pd
 
-from categories import COLUMNS, COUNTING, PART_COLUMNS, totals
+from categories import Category, keys, score
 
 
-def period_lines(weeks: pd.DataFrame, week: int | None) -> pd.DataFrame:
-    """One row per team_id with the 9 categories.
+def period_lines(weeks: pd.DataFrame, cats: list[Category], week: int | None) -> pd.DataFrame:
+    """One row per team_id, a column per category (the values shown).
 
-    week=None is the season: counting stats become per-week averages (teams can
-    have played different numbers of weeks), and percentages are recomputed from
-    season makes/attempts rather than averaged week to week.
+    week=None is the season: count categories become per-week averages (teams can
+    have played different numbers of weeks), and ratios are recomputed from the
+    season's two totals rather than averaged week to week.
     """
-    if week is not None:
-        return weeks.loc[weeks["matchup_period"] == week].set_index("team_id")[COLUMNS]
+    rows = weeks if week is None else weeks.loc[weeks["matchup_period"] == week]
+    out = {}
+    for cat in cats:
+        one = rows.loc[rows["category"] == cat.key]
+        by_team = one.groupby("team_id")
+        if week is not None:
+            out[cat.key] = by_team["value"].first()
+        elif cat.kind == "ratio" and one["den"].notna().any():
+            sums = by_team[["num", "den"]].sum(min_count=1)
+            out[cat.key] = sums["num"] / sums["den"].where(sums["den"] != 0)
+        else:
+            out[cat.key] = by_team["value"].mean()
+    return pd.DataFrame(out).reindex(columns=keys(cats)).astype("float64")
 
-    def season_line(team_weeks: pd.DataFrame) -> pd.Series:
-        line = totals(team_weeks)
-        line[COUNTING] = line[COUNTING] / len(team_weeks)
-        return line
 
-    cols = sorted(set(COUNTING) | set(PART_COLUMNS))
-    return weeks.groupby("team_id")[cols].apply(season_line)[COLUMNS]
+def scores(lines: pd.DataFrame, cats: list[Category]) -> pd.DataFrame:
+    """Values -> comparable scores: higher always better."""
+    return pd.DataFrame({c.key: score(c, lines[c.key]) for c in cats}, index=lines.index)
 
 
-def zscores(lines: pd.DataFrame) -> pd.DataFrame:
-    """How many league standard deviations each team sits above or below the
-    league average, per category. NaN where every team is equal (std 0)."""
-    std = lines.std(ddof=0).replace(0, float("nan"))
-    return (lines - lines.mean()) / std
+def zscores(lines: pd.DataFrame, cats: list[Category]) -> pd.DataFrame:
+    """How many league standard deviations each team sits above (better) or below
+    the league average, per category. NaN where every team is equal (std 0)."""
+    s = scores(lines, cats)
+    std = s.std(ddof=0).replace(0, float("nan"))
+    return (s - s.mean()) / std
 
 
 def head_to_head(a: pd.Series, b: pd.Series) -> tuple[int, int, int]:
-    """(a's wins, b's wins, ties) across the 9 categories. A NaN compares as a tie."""
+    """(a's wins, b's wins, ties) across the categories, from scores. A NaN ties."""
     wins = int((a > b).sum())
     losses = int((a < b).sum())
-    return wins, losses, len(COLUMNS) - wins - losses
+    return wins, losses, len(a) - wins - losses

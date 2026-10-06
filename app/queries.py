@@ -1,141 +1,87 @@
-"""Maps each dashboard page to its BigQuery view (Step 6). Pages import from here
-and never contain raw SQL directly, so renaming a view or adding a filter is a
-one-file change.
+"""Every BigQuery read the dashboard makes. Pages never contain SQL.
 
-Every read is cached for an hour: the data only changes once a day (Step 4's 5 AM
-ingest), so page clicks never re-hit BigQuery. Each query is limited to the latest
-season, so last year's rows never leak into this year's pages.
+The dashboard reads only the small precomputed m_* tables (ingest refreshes them per
+league; see ingest/materialize.py), always for one league, as a query parameter --
+so a page can't read another league's rows, and each query scans one league's
+clustered blocks.
+
+Reads are cached per (league, data version): `version` is the league's
+last_ingested_at, so new data shows up as soon as it lands and the cache is never
+cleared by hand. Within a version, nothing re-hits BigQuery.
 """
-
-import os
 
 import pandas as pd
 import streamlit as st
-from dotenv import load_dotenv
 from google.cloud import bigquery
 
-load_dotenv()  # local development only; Cloud Run sets these as real env vars
-PROJECT = os.environ.get("GCP_PROJECT_ID", "fantasy-dash-emk")
-DATASET = os.environ.get("BIGQUERY_DATASET", "fantasy")
+import settings
 
 
 @st.cache_resource
 def _client() -> bigquery.Client:
-    return bigquery.Client(project=PROJECT)
+    return bigquery.Client(project=settings.PROJECT, location=settings.LOCATION)
 
 
-@st.cache_data(ttl=3600, show_spinner="Loading league data...")
-def _read(sql: str) -> pd.DataFrame:
-    df = _client().query(sql).to_dataframe(create_bqstorage_client=False)
-    # ESPN keeps whatever spacing a manager typed, trailing spaces included -- which
-    # breaks Markdown bold (`**Name **`) and makes names look misaligned.
-    for col in ("team_name", "opponent_name"):
+@st.cache_data(ttl=6 * 3600, max_entries=400, show_spinner="Loading league data...")
+def _read(table: str, league_id: int, version: str) -> pd.DataFrame:
+    sql = (
+        f"SELECT * FROM `{settings.PROJECT}.{settings.DATASET}.{table}` "
+        "WHERE league_id = @league_id"
+    )
+    config = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("league_id", "INT64", int(league_id))]
+    )
+    df = _client().query(sql, job_config=config).to_dataframe(create_bqstorage_client=False)
+    # ESPN keeps whatever spacing a manager typed, trailing spaces included.
+    for col in ("team_name", "opponent_name", "player_name"):
         if col in df:
             df[col] = df[col].str.strip()
     return df
 
 
-def _table(name: str) -> str:
-    return f"`{PROJECT}.{DATASET}.{name}`"
+def team_week_cats(league_id: int, version: str) -> pd.DataFrame:
+    """Compare, Matchups: each team's value per category per week (long)."""
+    return _read("m_team_week_cats", league_id, version)
 
 
-def _current_season(view: str) -> pd.DataFrame:
-    t = _table(view)
-    return _read(f"SELECT * FROM {t} WHERE season = (SELECT MAX(season) FROM {t})")
+def all_play(league_id: int, version: str) -> pd.DataFrame:
+    return _read("m_all_play", league_id, version)
 
 
-def teams() -> pd.DataFrame:
-    """Latest snapshot of each team: name and real record. Home page, and the team
-    names v_team_week_cats doesn't carry."""
-    t = _table("teams")
-    return _read(f"""
-        SELECT team_id, team_name, owner, wins, losses, ties, standing
-        FROM {t}
-        WHERE season = (SELECT MAX(season) FROM {t})
-        QUALIFY ROW_NUMBER() OVER (PARTITION BY team_id ORDER BY snapshot_date DESC) = 1
-    """)
+def power_rankings(league_id: int, version: str) -> pd.DataFrame:
+    return _read("m_power_rankings", league_id, version)
 
 
-def last_updated() -> pd.Timestamp | None:
-    """When the ingest job last wrote data -- shown in the sidebar on every page."""
-    df = _read(f"SELECT MAX(ingested_at) AS ts FROM {_table('teams')}")
-    ts = df["ts"].iloc[0]
-    return None if pd.isna(ts) else ts
+def luck(league_id: int, version: str) -> pd.DataFrame:
+    return _read("m_luck", league_id, version)
 
 
-def latest_ingest_uncached() -> pd.Timestamp | None:
-    """When the last complete ingest finished loading -- league_status is the table
-    it writes last. Not cached: the Refresh button polls it while the job runs."""
-    df = (
-        _client()
-        .query(f"SELECT MAX(ingested_at) AS ts FROM {_table('league_status')}")
-        .to_dataframe(create_bqstorage_client=False)
-    )
-    ts = df["ts"].iloc[0]
-    return None if pd.isna(ts) else ts
+def transactions(league_id: int, version: str) -> pd.DataFrame:
+    return _read("m_transactions", league_id, version)
 
 
-def team_week_cats() -> pd.DataFrame:
-    """Compare page."""
-    return _current_season("v_team_week_cats")
+def player_pool(league_id: int, version: str) -> pd.DataFrame:
+    """Per-game stat lines (long: player x stat window x stat)."""
+    return _read("m_player_pool", league_id, version)
 
 
-def power_rankings() -> pd.DataFrame:
-    """Power Rankings page."""
-    return _current_season("v_power_rankings")
+def player_z(league_id: int, version: str) -> pd.DataFrame:
+    """Every pool player's z per category per stat window (long)."""
+    return _read("m_player_z", league_id, version)
 
 
-def league_status() -> pd.Series:
-    """Latest ingest's view of the season: current matchup period, regular-season
-    length, snapshot date."""
-    t = _table("league_status")
-    df = _read(f"SELECT * FROM {t} ORDER BY season DESC, snapshot_date DESC LIMIT 1")
-    return df.iloc[0] if not df.empty else None
+def category_ranks(league_id: int, version: str) -> pd.DataFrame:
+    return _read("m_category_ranks", league_id, version)
 
 
-def all_play() -> pd.DataFrame:
-    """Power Rankings' projection: actual all-play records for finished weeks."""
-    return _current_season("v_all_play")
+def player_profile(league_id: int, version: str) -> pd.DataFrame:
+    return _read("m_player_profile", league_id, version)
 
 
-def player_z() -> pd.DataFrame:
-    """Trade Analyzer and Category Rankings: every pool player's z per category, for
-    every stat window, latest snapshot (the view only holds the latest)."""
-    return _current_season("v_player_z")
+def roster_strength(league_id: int, version: str) -> pd.DataFrame:
+    return _read("m_roster_strength", league_id, version)
 
 
-def player_pool() -> pd.DataFrame:
-    """Trade Analyzer's per-game table: raw per-game lines for rostered players and
-    free agents, every stat window, latest snapshot."""
-    return _current_season("v_player_pool")
-
-
-def player_profile() -> pd.DataFrame:
-    """Trade Analyzer's mock trade: each pool player's health (ESPN status, return
-    date, outlook) and average games played over the last 3 seasons."""
-    return _current_season("v_player_profile")
-
-
-def category_ranks() -> pd.DataFrame:
-    """Roster Strength page, Category rankings tab: both lenses."""
-    return _read(f"SELECT * FROM {_table('v_category_ranks')}")
-
-
-def luck() -> pd.DataFrame:
-    """Matchups and Luck page (with team_week_cats for the scoreboard values)."""
-    return _current_season("v_luck")
-
-
-def transactions() -> pd.DataFrame:
-    """Transactions page."""
-    return _current_season("v_transactions")
-
-
-def roster_strength() -> pd.DataFrame:
-    """Roster Strength page."""
-    return _current_season("v_roster_strength")
-
-
-def team_roster_stats() -> pd.DataFrame:
-    """Trade Analyzer page."""
-    return _current_season("v_team_roster_stats")
+def teams(league_id: int, version: str) -> pd.DataFrame:
+    """Each team's name, manager and real record (a raw table, one row per team)."""
+    return _read("teams", league_id, version)

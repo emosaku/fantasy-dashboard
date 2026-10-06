@@ -1,27 +1,64 @@
-"""Streamlit entry point (Step 6). Multipage app via the st.navigation pages API;
-the six feature pages live in app/pages/. Everything sits behind a manager login
-(app/login.py); until someone signs in, the login page is the only page. Run
-locally with:
+"""League Lab's entry point. Multipage app via st.navigation; the feature pages live
+in app/pages/. Signed out, only the landing page, the invite page and the privacy
+policy exist. Run locally from the repo root with:
 
     streamlit run app/Home.py
-
-Deployed as a Cloud Run service in Step 7.
 """
 
+import settings  # noqa: I001  (first: sets up the import path)
 import streamlit as st
 
-import login
-import queries
+import league
 import ui
 
-st.set_page_config(page_title="Fantasy Dashboard", page_icon=":material/sports_basketball:")
+st.set_page_config(page_title="League Lab", page_icon=":material/science:")
+
+if settings.SHUTDOWN:
+    st.title("League Lab has shut down")
+    st.write(
+        "League Lab is no longer running, and every league's data has been deleted. "
+        "Thanks to everyone who used it."
+    )
+    st.stop()
+
+PRIVACY = st.Page("pages/privacy.py", title="Privacy", icon=":material/policy:", url_path="privacy")
+JOIN = st.Page("pages/join.py", title="Join a league", icon=":material/group_add:", url_path="join")
+
+
+def landing() -> None:
+    st.title("League Lab")
+    st.subheader("The analysis ESPN doesn't show you, for your fantasy basketball league.")
+    st.markdown(
+        "- **Power rankings by all-play**: your record if you'd played everyone, every week\n"
+        "- **Luck**: who's winning more than their stats say\n"
+        "- **Trade analyzer**: win-win trades and waiver moves for *your* categories\n"
+        "- **Category and player rankings**, **head-to-head compare**, **every transaction**"
+    )
+    st.caption(
+        "For head-to-head categories leagues (Most Categories or Each Category), any "
+        "category set. Public leagues only for now. Free, no ads."
+    )
+    if not league.auth_configured() and not settings.DEV_AUTH_EMAIL:
+        st.warning("Sign-in isn't set up on this server yet.")
+        return
+    if st.button("Sign in with Google", type="primary", icon=":material/login:"):
+        league.sign_in()
+    st.caption(
+        "Have an invite link? Sign in first, then open the link again. Signing in shares "
+        "only your name and email with League Lab."
+    )
 
 
 def home() -> None:
-    st.title("League dashboard")
-    st.caption("Everything ESPN doesn't show you, refreshed every morning.")
+    ctx = league.current()
+    st.title(ctx.name)
+    st.caption(
+        f"{ctx.season} season · {ctx.scoring_label} · {len(ctx.cats)} categories: "
+        + ", ".join(c.label for c in ctx.cats)
+    )
+    import queries  # here, so signed-out visitors never touch BigQuery
 
-    standings = queries.teams().sort_values(["standing", "team_name"])
+    standings = queries.teams(ctx.league_id, ctx.version).sort_values(["standing", "team_name"])
     standings["Record"] = (
         standings["wins"].astype(str)
         + "-"
@@ -29,12 +66,14 @@ def home() -> None:
         + "-"
         + standings["ties"].astype(str)
     )
+    standings["You"] = standings["team_id"].map(lambda t: "●" if t == ctx.my_team else "")
     st.subheader("Standings")
     st.dataframe(
-        standings[["standing", "team_name", "Record", "owner"]],
+        standings[["standing", "team_name", "You", "Record", "owner"]],
         column_config={
             "standing": st.column_config.NumberColumn("#", width="small"),
             "team_name": "Team",
+            "You": st.column_config.TextColumn("", width="small"),
             "owner": "Manager",
         },
         hide_index=True,
@@ -77,14 +116,51 @@ PAGE_BLURBS = [
     (PAGES["players"], "Every player ranked in every category, rostered or free agent."),
 ]
 
-login.sync_cookie()
-if login.current_user() is None:
-    st.navigation([st.Page(login.login_page, title="Sign in", icon=":material/login:")]).run()
+user = league.current_user()
+if user is None:
+    st.navigation(
+        [
+            st.Page(landing, title="League Lab", icon=":material/science:", default=True),
+            JOIN,
+            PRIVACY,
+        ],
+        position="hidden",
+    ).run()
+    ui.footer()
     st.stop()
 
 nav = st.navigation(
-    [st.Page(home, title="Home", icon=":material/home:", default=True), *PAGES.values()]
-)
-login.sidebar_user(queries.teams().set_index("team_id")["team_name"].str.strip())
-ui.sidebar_freshness()
+    {
+        "": [st.Page(home, title="Home", icon=":material/home:", default=True)],
+        "Analysis": list(PAGES.values()),
+        "Leagues": [
+            st.Page("pages/league_admin.py", title="League settings", icon=":material/tune:",
+                    url_path="league"),
+            st.Page("pages/register.py", title="Register a league", icon=":material/add:",
+                    url_path="register"),
+            JOIN,
+            PRIVACY,
+        ],
+    }
+)  # fmt: skip
+
+# Sidebar: which league, who's signed in, and the open league's data freshness.
+ids = league.open_league_ids()
+if ids:
+    league.selected_league_id()  # makes sure session_state["league_id"] is one of ids
+    if len(ids) > 1:
+        st.sidebar.selectbox(
+            "League",
+            ids,
+            format_func=lambda i: (league.league_doc(i) or {}).get("league_name") or f"League {i}",
+            key="league_id",
+        )
+    ctx = league.build_context(st.session_state["league_id"])
+    if ctx is not None:
+        ui.sidebar_league(ctx)
+st.sidebar.caption(f"Signed in as **{user['name']}**")
+if st.sidebar.button("Sign out", icon=":material/logout:"):
+    league.sign_out()
+
 nav.run()
+ui.footer()

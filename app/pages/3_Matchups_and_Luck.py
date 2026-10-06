@@ -1,19 +1,22 @@
-"""Matchups and Luck page (Step 6): week picker; category scoreboard per matchup and
-a luck bar chart (actual vs. all-play win %). Reads v_luck, plus v_team_week_cats for
-the scoreboard's category values.
+"""Matchups and Luck page: week picker; category scoreboard per matchup and a luck
+bar chart (actual vs. all-play win %, at the level the league scores: matchups for
+Most Categories, categories for Each Category). Reads m_luck, plus m_team_week_cats
+for the scoreboard's category values.
 """
 
 import plotly.graph_objects as go
 import streamlit as st
 
+import league
 import queries
 import ui
-from categories import COLUMNS, LABELS, fmt
+from categories import fmt
 
 st.title("Matchups and Luck")
+ctx = league.current()
 
-luck = queries.luck()
-cats = queries.team_week_cats()
+luck = queries.luck(ctx.league_id, ctx.version)
+week_cats = queries.team_week_cats(ctx.league_id, ctx.version)
 if luck.empty:
     st.info("No matchup data yet.")
     st.stop()
@@ -21,10 +24,19 @@ if luck.empty:
 weeks = sorted(luck["matchup_period"].unique(), reverse=True)
 week = st.selectbox("Week", weeks, format_func=lambda w: f"Week {w}")
 this_week = luck.loc[luck["matchup_period"] == week]
-values = cats.loc[cats["matchup_period"] == week].set_index("team_id")
+this_cats = week_cats.loc[week_cats["matchup_period"] == week]
+values = this_cats.pivot(index="team_id", columns="category", values="value")
+score = this_cats.pivot(index="team_id", columns="category", values="score")
 
 st.subheader(f"Week {week} scoreboard")
-st.caption("Category scores are ESPN's. The higher value in each category is bold.")
+st.caption(
+    "Category scores are ESPN's. The winning value in each category is bold"
+    + (
+        " (fewer wins in lower-is-better categories)."
+        if any(c.lower_is_better for c in ctx.cats)
+        else "."
+    )
+)
 
 
 def scoreboard(home: int, away: int) -> None:
@@ -38,14 +50,15 @@ def scoreboard(home: int, away: int) -> None:
         hi, lo = max(h.cat_wins, h.cat_losses), min(h.cat_wins, h.cat_losses)
         st.markdown(f"**{winner}** wins {hi}-{lo}-{h.cat_ties}")
     rows = []
-    for col in COLUMNS:
-        hv, av = values.at[home, col], values.at[away, col]
-        hs, as_ = fmt(col, hv), fmt(col, av)
-        if hv > av:
+    for cat in ctx.cats:
+        hv, av = values.at[home, cat.key], values.at[away, cat.key]
+        hscore, ascore = score.at[home, cat.key], score.at[away, cat.key]
+        hs, as_ = fmt(cat, hv), fmt(cat, av)
+        if hscore > ascore:
             hs = f"**{hs}**"
-        elif av > hv:
+        elif ascore > hscore:
             as_ = f"**{as_}**"
-        rows.append(f"| {hs} | {LABELS[col]} | {as_} |")
+        rows.append(f"| {hs} | {cat.label} | {as_} |")
     header = f"| {h.team_name} | | {h.opponent_name} |\n|--:|:-:|:--|\n"
     st.markdown(header + "\n".join(rows))
 
@@ -59,8 +72,9 @@ for i, (home, away) in enumerate(pairs.itertuples(index=False)):
 
 st.subheader("Luck")
 st.caption(
-    f"Season to date through week {week}: actual win % minus all-play win %. "
-    "Positive means a better record than the team's stats have earned."
+    f"Season to date through week {week}: actual win % minus all-play win %"
+    + (" (both counted in categories, as Each Category scores)" if ctx.each_category else "")
+    + ". Positive means a better record than the team's stats have earned."
 )
 board = this_week.sort_values("luck")
 c = ui.colors()

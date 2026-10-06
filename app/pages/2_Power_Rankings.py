@@ -1,24 +1,29 @@
-"""Power Rankings page (Step 6): week slider; ranked table with all-play record, a
-projected finish through the end of the regular season that leaves injured players
-out of the weeks they're expected to miss (app/analysis/projection.py), and a
-rank-over-time line chart. Reads v_power_rankings, v_all_play, v_player_pool and
-league_status.
+"""Power Rankings page: week slider; ranked table with all-play record, a projected
+finish through the end of the regular season that leaves injured players out of the
+weeks they're expected to miss (app/analysis/projection.py), and a rank-over-time
+line chart. Ranks follow the league's scoring: matchup win % for Most Categories,
+category win % for Each Category. Reads m_power_rankings, m_all_play and
+m_player_pool; season length from the registry.
 """
 
 import plotly.graph_objects as go
 import streamlit as st
 
+import league
 import queries
 import ui
 from analysis.projection import InjuryRules, availability, per_game_lines, project_season
 
 st.title("Power Rankings")
+ctx = league.current()
+measure = "category win %" if ctx.each_category else "win %"
 st.caption(
     "Ranked by all-play: the record each team would have if it played every other "
-    "team every week. Teams level on win % share a rank."
+    f"team every week. This league scores {ctx.scoring_label}, so teams are ranked on "
+    f"{measure}; teams level on it share a rank."
 )
 
-ranks = queries.power_rankings()
+ranks = queries.power_rankings(ctx.league_id, ctx.version)
 if ranks.empty:
     st.info("No matchup data yet.")
     st.stop()
@@ -32,13 +37,14 @@ if len(weeks) > 1:
 
 now = ranks.loc[ranks["matchup_period"] == week].sort_values(["power_rank", "team_name"])
 before = ranks.loc[ranks["matchup_period"] == week - 1].set_index("team_id")["power_rank"]
+prefix = "ap_cat_" if ctx.each_category else "ap_"  # categories or matchups
 now = now.assign(
     move=now["team_id"].map(before) - now["power_rank"],
-    record=now["ap_wins"].astype(str)
+    record=now[f"{prefix}wins"].astype(str)
     + "-"
-    + now["ap_losses"].astype(str)
+    + now[f"{prefix}losses"].astype(str)
     + "-"
-    + now["ap_ties"].astype(str),
+    + now[f"{prefix}ties"].astype(str),
 )
 
 
@@ -55,7 +61,12 @@ st.dataframe(
         "power_rank": st.column_config.NumberColumn("#", width="small"),
         "team_name": "Team",
         "move": st.column_config.TextColumn("Move", help="Change since the previous week"),
-        "record": st.column_config.TextColumn("All-play", help="Wins-losses-ties vs everyone"),
+        "record": st.column_config.TextColumn(
+            "All-play",
+            help="Category wins-losses-ties vs everyone"
+            if ctx.each_category
+            else "Wins-losses-ties vs everyone",
+        ),
         "ap_win_pct": st.column_config.NumberColumn("Win %", format="%.3f"),
         "ap_cat_win_pct": st.column_config.NumberColumn(
             "Cat win %", format="%.3f", help="Share of categories won vs everyone"
@@ -72,9 +83,8 @@ def record(wins, losses, ties) -> list[str]:
 
 
 st.subheader("Projected finish, as of today")
-status = queries.league_status()
-pool = queries.player_pool()
-if status is None or pool.empty:
+pool = queries.player_pool(ctx.league_id, ctx.version)
+if pool.empty:
     st.info("The projection appears after the next morning's data refresh.")
 else:
     with st.expander("Injury assumptions"):
@@ -89,12 +99,20 @@ else:
         dtd_weeks = a3.number_input("Day-to-day: weeks out", 0, 20, 1)
     rules = InjuryRules(day_to_day_weeks=dtd_weeks, out_weeks=out_weeks, ir_weeks=ir_weeks)
 
-    current = int(status["current_matchup_period"])
-    last_week = int(status["reg_season_matchup_periods"])
-    teams = queries.teams().set_index("team_id")["team_name"]
+    current, last_week = ctx.current_week, ctx.last_week
+    as_of = ctx.doc["last_ingested_at"].date()
+    teams = ctx.team_names
     lines = per_game_lines(pool)
     proj = project_season(
-        lines, queries.all_play(), current, last_week, status["snapshot_date"], rules, teams.index
+        lines,
+        queries.all_play(ctx.league_id, ctx.version),
+        ctx.cats,
+        current,
+        last_week,
+        as_of,
+        rules,
+        teams.index,
+        ctx.each_category,
     )
     proj = proj.assign(team_name=proj["team_id"].map(teams)).sort_values(
         ["projected_rank", "team_name"]
@@ -111,7 +129,9 @@ else:
     st.caption(
         f"{how} from today's rosters: each available player's per-game averages (his "
         "season averages, or ESPN's projection until he's played), compared team against "
-        "team on the 9 categories, week by week as injured players return."
+        f"team on the league's {len(ctx.cats)} categories, week by week as injured players "
+        "return."
+        + (" Records count categories, as Each Category scores." if ctx.each_category else "")
     )
     proj = proj.assign(
         so_far=record(proj["actual_wins"], proj["actual_losses"], proj["actual_ties"]),
@@ -142,8 +162,9 @@ else:
             ),
             "per_week": st.column_config.TextColumn(
                 "Wins per week",
-                help="Projected all-play wins in a remaining week (of 13): a range when "
-                "injured players are due back partway through",
+                help="Projected all-play wins in a remaining week (of "
+                f"{(len(teams) - 1) * (len(ctx.cats) if ctx.each_category else 1)}): a range "
+                "when injured players are due back partway through",
             ),
             "missing_now": st.column_config.NumberColumn(
                 "Injured now", help="Players expected to miss the current week"
@@ -158,7 +179,7 @@ else:
         height=ui.table_height(len(proj)),
     )
 
-    missing = availability(lines, current, status["snapshot_date"], rules)
+    missing = availability(lines, current, as_of, rules)
     missing = missing.loc[missing["back_in_week"] > current].sort_values(
         ["back_in_week", "player_name"], ascending=[False, True]
     )

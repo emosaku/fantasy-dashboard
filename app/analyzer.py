@@ -1,8 +1,9 @@
-"""Cached glue between the BigQuery views and app/analysis for the pages that use
-the z-score foundation (Roster Strength's Category rankings, Trade Analyzer).
+"""Cached glue between the m_player_z table and app/analysis for the pages that use
+the z-score foundation (Roster Strength's Category rankings, Trade Analyzer,
+Player Rankings).
 
-Everything is keyed on plain values (stat window, delta, overrides as a tuple), so
-Streamlit caches each combination for an hour like the view reads it's built on.
+Everything is keyed on plain values (league, data version, stat window, delta,
+overrides as a tuple), so Streamlit caches each combination like the reads beneath.
 """
 
 import pandas as pd
@@ -23,34 +24,35 @@ STAT_WINDOWS = {
 }
 
 
-def available_windows() -> list[str]:
-    have = set(queries.player_z()["stat_window"])
+def available_windows(league_id: int, version: str) -> list[str]:
+    have = set(queries.player_z(league_id, version)["stat_window"])
     return [w for w in STAT_WINDOWS if w in have]
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def league(window: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+@st.cache_data(ttl=6 * 3600, max_entries=200, show_spinner=False)
+def league(league_id: int, version: str, window: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     """(players, team totals) for one stat window."""
-    z = queries.player_z()
+    z = queries.player_z(league_id, version)
     players = player_matrix(z.loc[z["stat_window"] == window])
     return players, team_totals(players)
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def weights_by_team(window: str, me: int, delta: float, overrides: tuple) -> dict:
+@st.cache_data(ttl=6 * 3600, max_entries=200, show_spinner=False)
+def weights_by_team(
+    league_id: int, version: str, window: str, me: int, delta: float, overrides: tuple
+) -> dict:
     """Every team's weights; only `me` gets the user's overrides."""
-    _, totals = league(window)
+    _, totals = league(league_id, version, window)
     return {
         t: compute_weights(totals, t, delta, dict(overrides) if t == me else None)
         for t in totals.index
     }
 
 
-@st.cache_data(ttl=3600, show_spinner="Searching every trade...")
-def all_trades(window: str, me: int, delta: float, overrides: tuple) -> pd.DataFrame:
-    players, totals = league(window)
-    return find_trades(players, totals, me, weights_by_team(window, me, delta, overrides), top=5000)
-
-
-def team_names() -> pd.Series:
-    return queries.teams().set_index("team_id")["team_name"].sort_values()
+@st.cache_data(ttl=6 * 3600, max_entries=50, show_spinner="Searching every trade...")
+def all_trades(
+    league_id: int, version: str, window: str, me: int, delta: float, overrides: tuple
+) -> pd.DataFrame:
+    players, totals = league(league_id, version, window)
+    weights = weights_by_team(league_id, version, window, me, delta, overrides)
+    return find_trades(players, totals, me, weights, top=5000)

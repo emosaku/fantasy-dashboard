@@ -7,9 +7,11 @@ the current one included, is projected on its own from today's rosters:
 
   * each player contributes his per-game line -- season averages once he has them,
     ESPN's projection until then -- but only in weeks he's expected to be available;
-  * a team's line is its available players' stats summed, percentages recomputed
-    from makes and attempts; teams are then compared on the 9 categories, all-play,
-    and a week is a W/L/T on category count (the league is H2H Most Categories).
+  * a team's line is its available players' stats summed, ratio categories
+    recomputed from the two totals; teams are then compared all-play on the league's
+    own categories (lower-is-better ones flipped). A Most Categories league scores a
+    week as one W/L/T per opponent, on category count; an Each Category league as a
+    W/L/T per category, so its records count categories.
 
 When an injured player is expected back (InjuryRules, adjustable on the page):
   1. ESPN's expected return date, when it has one: the current week plus the whole
@@ -31,9 +33,8 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from categories import COLUMNS, PCT_PARTS
-
-SUM_COLUMNS = ["pts", "reb", "ast", "stl", "blk", "fg3m", "fg3a", "fgm", "fga", "ftm", "fta"]
+from categories import Category, stats_needed
+from trade import wide_lines
 
 
 @dataclass(frozen=True)
@@ -44,14 +45,14 @@ class InjuryRules:
 
 
 def per_game_lines(pool: pd.DataFrame) -> pd.DataFrame:
-    """One per-game line per rostered player from v_player_pool: season averages if he
-    has them, else ESPN's projection."""
+    """One per-game line per rostered player from v_player_pool (long): season
+    averages if he has them, else ESPN's projection. Wide: a column per stat."""
     rostered = pool.loc[pool["team_id"].notna() & pool["stat_window"].isin(["season", "projected"])]
-    return (
-        rostered.sort_values("stat_window", ascending=False)  # 'season' before 'projected'
-        .drop_duplicates("player_id")
-        .reset_index(drop=True)
-    )
+    has_season = set(rostered.loc[rostered["stat_window"] == "season", "player_id"])
+    chosen = rostered.loc[
+        (rostered["stat_window"] == "season") | ~rostered["player_id"].isin(has_season)
+    ]
+    return wide_lines(chosen)
 
 
 def back_in_week(player, current_week: int, as_of, rules: InjuryRules) -> tuple[int, str]:
@@ -78,28 +79,37 @@ def availability(lines, current_week, as_of, rules) -> pd.DataFrame:
     )
 
 
-def _team_lines(sums: np.ndarray) -> np.ndarray:
-    """Summed stats (teams x SUM_COLUMNS) -> the 9 categories (teams x 9)."""
-    col = {c: i for i, c in enumerate(SUM_COLUMNS)}
-    out = np.empty((len(sums), len(COLUMNS)))
+def team_scores(sums: np.ndarray, stat_cols: list[str], cats: list[Category]) -> np.ndarray:
+    """Summed stats (teams x stat_cols) -> category scores (teams x categories):
+    ratios from the two totals (NaN with nothing below the line), lower-is-better
+    categories negated so higher always wins."""
+    col = {c: i for i, c in enumerate(stat_cols)}
+    out = np.empty((len(sums), len(cats)))
     with np.errstate(invalid="ignore", divide="ignore"):
-        for k, c in enumerate(COLUMNS):
-            if c in PCT_PARTS:
-                makes, attempts = PCT_PARTS[c]
-                a = sums[:, col[attempts]]
-                out[:, k] = np.where(a > 0, sums[:, col[makes]] / a, np.nan)
-            else:
-                out[:, k] = sums[:, col[c]]
+        for k, cat in enumerate(cats):
+            num = sums[:, col[cat.num]]
+            if cat.kind == "ratio":
+                den = sums[:, col[cat.den]]
+                num = np.where(den > 0, num / den, np.nan)
+            out[:, k] = -num if cat.lower_is_better else num
     return out
 
 
-def week_records(cats: np.ndarray) -> np.ndarray:
-    """All-play W/L/T for one week (teams x 3). A NaN category is a tie."""
-    a, b = cats[:, None, :], cats[None, :, :]
-    won, lost = (a > b).sum(-1), (a < b).sum(-1)
+def week_records(scores: np.ndarray, each_category: bool = False) -> np.ndarray:
+    """All-play W/L/T for one week (teams x 3). A NaN category is a tie.
+
+    Most Categories: one result per opponent, on category count. Each Category: one
+    result per opponent per category."""
+    a, b = scores[:, None, :], scores[None, :, :]
+    won_cat, lost_cat = a > b, a < b  # teams x teams x categories
+    n, k = scores.shape
+    if each_category:
+        wins = won_cat.sum((1, 2))
+        losses = lost_cat.sum((1, 2))
+        return np.column_stack([wins, losses, (n - 1) * k - wins - losses])
+    won, lost = won_cat.sum(-1), lost_cat.sum(-1)
     np.fill_diagonal(won, 0)
     np.fill_diagonal(lost, 0)
-    n = len(cats)
     wins = (won > lost).sum(1)
     losses = (won < lost).sum(1)
     return np.column_stack([wins, losses, (n - 1) - wins - losses])
@@ -108,19 +118,23 @@ def week_records(cats: np.ndarray) -> np.ndarray:
 def project_season(
     lines: pd.DataFrame,
     all_play: pd.DataFrame,
+    cats: list[Category],
     current_week: int,
     last_week: int,
     as_of,
     rules: InjuryRules = InjuryRules(),
     team_ids=None,
+    each_category: bool = False,
 ) -> pd.DataFrame:
     """One row per team: actual record so far, projected record for the remaining
-    weeks (and its best/worst week), the final record, win % and rank."""
+    weeks (and its best/worst week), the final record, win % and rank. Records are
+    matchups (Most Categories) or categories (Each Category)."""
     team_ids = list(team_ids if team_ids is not None else sorted(lines["team_id"].unique()))
     pos = {t: i for i, t in enumerate(team_ids)}
     avail = availability(lines, current_week, as_of, rules)
 
-    stats = avail[SUM_COLUMNS].fillna(0).to_numpy(float)
+    stat_cols = stats_needed(cats)
+    stats = avail.reindex(columns=stat_cols).fillna(0).to_numpy(float)
     owner = np.zeros((len(team_ids), len(avail)))
     owner[avail["team_id"].map(pos).to_numpy(int), np.arange(len(avail))] = 1.0
     back = avail["back_in_week"].to_numpy()
@@ -129,16 +143,18 @@ def project_season(
     per_week = np.zeros((len(weeks), len(team_ids), 3))
     for k, week in enumerate(weeks):
         sums = owner @ (stats * (back <= week)[:, None])
-        per_week[k] = week_records(_team_lines(sums))
+        per_week[k] = week_records(team_scores(sums, stat_cols, cats), each_category)
 
     finished = all_play.loc[
         (all_play["matchup_period"] < current_week) & (all_play["matchup_period"] <= last_week)
     ]
+    record_cols = (
+        ["ap_cat_wins", "ap_cat_losses", "ap_cat_ties"]
+        if each_category
+        else ["ap_wins", "ap_losses", "ap_ties"]
+    )
     actual = (
-        finished.groupby("team_id")[["ap_wins", "ap_losses", "ap_ties"]]
-        .sum()
-        .reindex(team_ids, fill_value=0)
-        .to_numpy()
+        finished.groupby("team_id")[record_cols].sum().reindex(team_ids, fill_value=0).to_numpy()
     )
     played = finished.groupby("team_id").size().reindex(team_ids, fill_value=0).to_numpy()
 

@@ -4,8 +4,6 @@ costs 1 team in 3PM." A half means a tie gained or lost."""
 
 import pandas as pd
 
-from categories import COLUMNS, LABELS
-
 
 def _count(n: float) -> str:
     return f"{n:g}"
@@ -21,10 +19,10 @@ def _phrase(items: list[tuple[str, float]]) -> str:
 
 def explain(cat_delta: pd.Series | dict) -> str:
     """cat_delta: change in category wins per category (column names as index)."""
-    deltas = pd.Series(cat_delta).reindex(COLUMNS).fillna(0.0)
+    deltas = pd.Series(cat_delta, dtype="float64").fillna(0.0)
     total = float(deltas.sum())
-    gains = [(LABELS[c], d) for c, d in deltas.sort_values(ascending=False).items() if d > 0]
-    losses = [(LABELS[c], -d) for c, d in deltas.sort_values().items() if d < 0]
+    gains = [(c, d) for c, d in deltas.sort_values(ascending=False).items() if d > 0]
+    losses = [(c, -d) for c, d in deltas.sort_values().items() if d < 0]
     if not gains and not losses:
         return "No change in category wins."
     noun = "category win" if abs(total) == 1 else "category wins"

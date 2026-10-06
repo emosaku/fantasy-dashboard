@@ -8,7 +8,6 @@ import pandas as pd
 
 from analysis.objective import category_wins
 from analysis.weights import player_values, punts
-from categories import COLUMNS
 
 
 def rank_waiver_moves(
@@ -21,11 +20,12 @@ def rank_waiver_moves(
 
     row = totals.loc[me].to_numpy()
     others = totals.drop(me).to_numpy()
-    zf, zd = free_agents[COLUMNS].to_numpy(), mine[COLUMNS].to_numpy()
+    cols = list(totals.columns)
+    zf, zd = free_agents[cols].to_numpy(), mine[cols].to_numpy()
 
     after = row + zf[:, None, :] - zd[None, :, :]  # free agent x drop x category
-    cat = category_wins(after.reshape(-1, len(COLUMNS)), others) - category_wins(row, others)
-    cat[:, np.isin(COLUMNS, punts(weights))] = 0.0
+    cat = category_wins(after.reshape(-1, len(cols)), others) - category_wins(row, others)
+    cat[:, np.isin(cols, punts(weights))] = 0.0
 
     vf = player_values(free_agents, weights).to_numpy()
     vd = player_values(mine, weights).to_numpy()
@@ -39,8 +39,8 @@ def rank_waiver_moves(
             "drop_name": mine["player_name"].to_numpy()[d_idx],
             "dE": cat.sum(1),
             "dv": vf[f_idx] - vd[d_idx],
-            **{f"dE_{c}": cat[:, i] for i, c in enumerate(COLUMNS)},
-            **{f"dz_{c}": (zf[f_idx] - zd[d_idx])[:, i] for i, c in enumerate(COLUMNS)},
+            **{f"dE_{c}": cat[:, i] for i, c in enumerate(cols)},
+            **{f"dz_{c}": (zf[f_idx] - zd[d_idx])[:, i] for i, c in enumerate(cols)},
         }
     )
     return moves.sort_values(["dE", "dv"], ascending=False).head(top).reset_index(drop=True)

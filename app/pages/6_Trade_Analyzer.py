@@ -1,19 +1,20 @@
-"""Trade Analyzer page (Step 6): recommends waiver pickups and trades for one team,
+"""Trade Analyzer page: recommends waiver pickups and trades for one team,
 ranked by how much each raises its expected all-play category wins (E), and keeps
 the mock-trade simulator from the original proposal.
 
-Controls: team (default team 10), stat window, swing size delta, per-category tier
-overrides. Four tabs: Team profile, Waiver wire, Trade finder, Mock trade. Any
-waiver or trade row loads into Mock trade, which runs the same simulation, so its
-numbers match the row's. The math lives in app/analysis (tested); this page only
-lays it out. Reads v_player_z (z-scores) and v_player_pool (per-game lines).
+Controls: team (your own; a commissioner can pick any), stat window, swing size
+delta, per-category tier overrides. Four tabs: Team profile, Waiver wire, Trade
+finder, Mock trade. Any waiver or trade row loads into Mock trade, which runs the
+same simulation, so its numbers match the row's. The math lives in app/analysis
+(tested); this page only lays it out. Reads m_player_z (z-scores) and m_player_pool
+(per-game lines).
 """
 
 import pandas as pd
 import streamlit as st
 
 import analyzer
-import login
+import league
 import queries
 import ui
 from analysis.explain import explain
@@ -21,29 +22,37 @@ from analysis.objective import expected_category_wins, matchup_record
 from analysis.trades import present, simulate_trade, top_targets, trade_chips
 from analysis.waivers import rank_waiver_moves
 from analysis.weights import compute_weights, punts
-from categories import COLUMNS, LABELS, fmt
+from categories import by_key, fmt, keys
 from categories import totals as totals_of
-from trade import trade_impact
+from trade import trade_impact, wide_lines
 
 st.title("Trade Analyzer")
+ctx = league.current()
+COLUMNS = keys(ctx.cats)
+CATS = by_key(ctx.cats)
 
-names = analyzer.team_names()
-windows = analyzer.available_windows()
+names = ctx.team_names
+windows = analyzer.available_windows(ctx.league_id, ctx.version)
 if names.empty or not windows:
     st.info("No player data yet.")
     st.stop()
 
 team_ids = [int(t) for t in names.index]
+# Each manager analyzes their own team; the league's commissioner can pick any.
+mine = ctx.my_team
+admin = ctx.is_commissioner
+if mine is None and not admin:
+    st.info("Pick your team on the League settings page to get recommendations for it.")
+    st.page_link("pages/league_admin.py", label="League settings", icon=":material/tune:")
+    st.stop()
 c1, c2, c3 = st.columns([1.6, 1, 1])
-# Each manager analyzes their own team; the commissioner (admin) can pick any.
-mine = login.my_team()
 me = c1.selectbox(
     "Team",
-    team_ids if login.is_admin() else [mine],
-    index=team_ids.index(mine) if login.is_admin() and mine in team_ids else 0,
+    team_ids if admin else [mine],
+    index=team_ids.index(mine) if admin and mine in team_ids else 0,
     format_func=names.get,
-    disabled=not login.is_admin(),
-    help=None if login.is_admin() else "Recommendations are for your own team.",
+    disabled=not admin,
+    help=None if admin else "Recommendations are for your own team.",
 )
 window = c2.selectbox("Stats from", windows, format_func=analyzer.STAT_WINDOWS.get)
 delta = c3.number_input(
@@ -63,17 +72,17 @@ with st.expander("Category strategy: override tiers"):
     grid = st.columns(3)
     choices = {
         col: grid[i % 3].selectbox(
-            LABELS[col], ["Auto", "Lock", "Swing", "Punt"], key=f"tier-{me}-{col}"
+            col, ["Auto", "Lock", "Swing", "Punt"], key=f"tier-{ctx.league_id}-{me}-{col}"
         )
         for i, col in enumerate(COLUMNS)
     }
 overrides = tuple(sorted((k, v) for k, v in choices.items() if v != "Auto"))
 
-players, totals = analyzer.league(window)
+players, totals = analyzer.league(ctx.league_id, ctx.version, window)
 if me not in totals.index:
     st.info("This team has no players with stats in this window.")
     st.stop()
-weights = analyzer.weights_by_team(window, me, delta, overrides)
+weights = analyzer.weights_by_team(ctx.league_id, ctx.version, window, me, delta, overrides)
 w_me = weights[me]
 punts_me = punts(w_me)
 player_name = players["player_name"]
@@ -120,7 +129,7 @@ with profile_tab:
     m1.metric(
         "Category wins vs everyone (E)",
         f"{expected_category_wins(totals, me, punts_me):g} of {max_e}",
-        help="Categories won if you played all 13 other teams; ties count half. "
+        help=f"Categories won if you played all {len(totals) - 1} other teams; ties count half. "
         "Punted categories don't count.",
     )
     m2.metric("All-play matchup record", f"{wins}-{losses}-{ties}")
@@ -131,7 +140,7 @@ with profile_tab:
         return f"{row['tier']} (auto: {row['auto_tier']})"
 
     profile = w_me.assign(
-        category=[LABELS[c] for c in w_me.index],
+        category=list(w_me.index),
         tier_shown=w_me.apply(tier_text, axis=1),
     )
     st.dataframe(
@@ -176,8 +185,8 @@ with waiver_tab:
             dz = pd.Series({col: move[f"dz_{col}"] for col in COLUMNS})
             up, down = dz.idxmax(), dz.idxmin()
             st.caption(
-                f"Biggest gain: {LABELS[up]} {dz[up]:+.2f} z · biggest cost: "
-                f"{LABELS[down]} {dz[down]:+.2f} z · value to you Δv {move['dv']:+.2f} · "
+                f"Biggest gain: {up} {dz[up]:+.2f} z · biggest cost: "
+                f"{down} {dz[down]:+.2f} z · value to you Δv {move['dv']:+.2f} · "
                 f"{move['add_name']} is {str(move['injury_status']).replace('_', ' ').lower()}"
             )
             st.button(
@@ -196,7 +205,7 @@ with finder_tab:
         "whoever gets two players drops their least useful one, and whoever gives two "
         "picks up the best free agent for the open spot."
     )
-    deals = analyzer.all_trades(window, me, delta, overrides)
+    deals = analyzer.all_trades(ctx.league_id, ctx.version, window, me, delta, overrides)
     f1, f2 = st.columns([1, 2])
     hide_lopsided = f1.checkbox(
         "Hide lopsided deals",
@@ -308,11 +317,14 @@ def keep_valid(key: str, options: list, multi: bool) -> None:
 def per_game_lines(window: str) -> pd.DataFrame:
     """Raw per-game lines for the per-game table. Blended has no raw line of its own,
     so it uses each player's season stats once he has them, else his projection."""
-    pool = queries.player_pool()
+    pool = queries.player_pool(ctx.league_id, ctx.version)
     if window != "blended":
-        return pool.loc[pool["stat_window"] == window]
+        return wide_lines(pool.loc[pool["stat_window"] == window])
     pool = pool.loc[pool["stat_window"].isin(["season", "projected"])]
-    return pool.sort_values("stat_window", ascending=False).drop_duplicates("player_id")
+    has_season = set(pool.loc[pool["stat_window"] == "season", "player_id"])
+    return wide_lines(
+        pool.loc[(pool["stat_window"] == "season") | ~pool["player_id"].isin(has_season)]
+    )
 
 
 with mock_tab:
@@ -401,7 +413,7 @@ with mock_tab:
     moves += [(pid, "You pick up") for pid in [my_add] if pid]
     moves += [(pid, "They drop") for pid in [their_drop] if pid]
     moves += [(pid, "They pick up") for pid in [their_add] if pid]
-    profile = queries.player_profile().set_index("player_id")
+    profile = queries.player_profile(ctx.league_id, ctx.version).set_index("player_id")
     deal_lines = per_game_lines(window).set_index("player_id")
     STATUS = {"ACTIVE": "Healthy", "DAY_TO_DAY": "Day-to-day", "OUT": "Out"}
 
@@ -424,8 +436,8 @@ with mock_tab:
 
     deal_rows = []
     for pid, move in moves:
-        # One player's 9 categories: percentages from his makes / attempts.
-        line = totals_of(deal_lines.loc[[pid]]) if pid in deal_lines.index else None
+        # One player's categories: ratios from his own two totals.
+        line = totals_of(deal_lines.loc[[pid]], ctx.cats) if pid in deal_lines.index else None
         avg_gp = profile.at[pid, "avg_games_played"] if pid in profile.index else None
         deal_rows.append(
             {
@@ -434,7 +446,7 @@ with mock_tab:
                 "Health": health(pid),
                 "Avg games (3 yrs)": avg_gp,
                 "Games by season": games_by_season(pid),
-                **{LABELS[c]: fmt(c, line[c]) if line is not None else "–" for c in COLUMNS},
+                **{c.key: fmt(c, line[c.key]) if line is not None else "–" for c in ctx.cats},
             }
         )
     st.dataframe(
@@ -488,7 +500,7 @@ with mock_tab:
 
         table = pd.DataFrame(
             {
-                "Category": [LABELS[c] for c in COLUMNS],
+                "Category": COLUMNS,
                 "Rank": [arrow(before_w.at[c, "rank"], after_w.at[c, "rank"]) for c in COLUMNS],
                 "Tier": [arrow(before_w.at[c, "tier"], after_w.at[c, "tier"]) for c in COLUMNS],
                 "z ±": [after.at[team_id, c] - totals.at[team_id, c] for c in COLUMNS],
@@ -502,7 +514,8 @@ with mock_tab:
                     format="%+.2f", help="Change in team z (sum of player z-scores)"
                 ),
                 "Wins ±": st.column_config.NumberColumn(
-                    format="%+g", help="Change in categories won against the other 13 teams"
+                    format="%+g",
+                    help=f"Change in categories won against the other {len(totals) - 1} teams",
                 ),
             },
             hide_index=True,
@@ -521,11 +534,17 @@ with mock_tab:
         lines = per_game_lines(window).set_index("player_id", drop=False)
         c = ui.colors()
 
-        def delta_cell(col: str, value: float) -> str:
+        def delta_cell(cat, value: float, better: float) -> str:
+            """The change, with ▲ when it helps (fewer turnovers is ▲) and ▼ when not."""
             if pd.isna(value) or abs(value) < 1e-9:
                 return "–"
-            text = f"{value:+.3f}".replace("0.", ".") if col.endswith("_pct") else f"{value:+.1f}"
-            return f"▲ {text}" if value > 0 else f"▼ {text}"
+            if cat.kind == "ratio" and cat.key.endswith("%"):
+                text = f"{value:+.3f}".replace("0.", ".")
+            elif cat.kind == "ratio":
+                text = f"{value:+.2f}"
+            else:
+                text = f"{value:+.1f}"
+            return f"▲ {text}" if better > 0 else f"▼ {text}"
 
         def color(cell: str) -> str:
             if cell.startswith("▲"):
@@ -537,13 +556,16 @@ with mock_tab:
         def per_game(team_id, out_ids, in_ids) -> None:
             roster = lines.loc[lines["team_id"] == team_id]
             receiving = lines.loc[[i for i in in_ids if i in lines.index]]
-            impact = trade_impact(roster, list(out_ids), receiving)
+            impact = trade_impact(roster, list(out_ids), receiving, ctx.cats)
             table = pd.DataFrame(
                 {
-                    "Category": [LABELS[col] for col in COLUMNS],
-                    "Before": [fmt(col, impact.at[col, "before"]) for col in COLUMNS],
-                    "After": [fmt(col, impact.at[col, "after"]) for col in COLUMNS],
-                    "Change": [delta_cell(col, impact.at[col, "delta"]) for col in COLUMNS],
+                    "Category": COLUMNS,
+                    "Before": [fmt(c, impact.at[c.key, "before"]) for c in ctx.cats],
+                    "After": [fmt(c, impact.at[c.key, "after"]) for c in ctx.cats],
+                    "Change": [
+                        delta_cell(c, impact.at[c.key, "delta"], impact.at[c.key, "better"])
+                        for c in ctx.cats
+                    ],
                 }
             )
             st.markdown(f"**{team_label(team_id)}**")

@@ -1,24 +1,48 @@
-"""Entry point for the espn-ingest Cloud Run Job (Step 4).
+"""League Lab's ingest job: refreshes many leagues per run, gently.
 
-Builds the espn_api League object from LEAGUE_ID/SEASON/ESPN_S2/SWID (injected as env
-vars via Cloud Run's --set-secrets, not read from Secret Manager directly), pulls the
-five data sources described in docs/proposal.md (Step 3) plus the league's status
-(current week, season length) and its top free agents -- both added in Step 6 -- and
-MERGEs each into its BigQuery
-target table via a staging table for idempotency.
+One Cloud Run Job with parallel tasks. Each task takes its slice of the leagues to
+refresh (CLOUD_RUN_TASK_INDEX of CLOUD_RUN_TASK_COUNT): active leagues someone has
+opened in the last 14 days, or exactly LEAGUE_IDS for a manual refresh. Per league,
+with a random pause between leagues and backoff on every ESPN call, it fetches only
+what changed -- the still-open matchup weeks, activity newer than it already has,
+games-played history for players it hasn't seen -- and replaces that league's rows.
+Then one refresh of the precomputed m_* tables covers all of the task's leagues.
+
+A league that fails (made private, deleted, unsupported) is marked with the reason
+in the registry; the others carry on. The run fails -- triggering the alert -- only
+when every league it tried failed. Leagues marked "deleting" are purged: all their
+rows, their registry entries and any stored credentials.
+
+Env: GCP_PROJECT_ID, SEASON (required); BIGQUERY_DATASET (league_lab); LEAGUE_IDS
+(comma list: manual refresh); PURGE_ONLY (1: only purge); FREE_AGENT_COUNT (100);
+HISTORY_SEASONS (3).
 """
 
+import datetime as dt
 import os
-from datetime import UTC, datetime
+import random
+import sys
+import time
 
 from google.cloud import bigquery
 
-from ingest.bigquery_load import merge_load
-from ingest.espn_client import build_league, fetch_player_info
-from ingest.transform import (
+from ingest import registry
+from ingest.bigquery_load import in_list, league_scope, replace_rows
+from ingest.catalog import league_categories
+from ingest.credentials import cookies_for
+from ingest.espn_client import (
+    build_league,
     fetch_activity,
+    fetch_player_history,
+    fetch_player_info,
+    fetch_settings,
+    polite,
+)
+from ingest.materialize import MATERIALIZED_VIEWS, refresh_statements, table_for
+from ingest.transform import (
     transform_free_agents,
-    transform_league_status,
+    transform_league_categories,
+    transform_league_settings,
     transform_matchup_categories,
     transform_player_details,
     transform_player_seasons,
@@ -28,88 +52,173 @@ from ingest.transform import (
     transform_transactions,
 )
 
+LEAGUE_TABLES = [
+    "league_settings", "league_categories", "teams", "matchup_categories", "rosters",
+    "free_agents", "player_stats", "transactions", "player_details",
+]  # fmt: skip
+STAGGER_SECONDS = (2.0, 8.0)
 
-def main() -> None:
-    season = int(os.environ["SEASON"])
-    project = os.environ.get("GCP_PROJECT_ID", "fantasy-dash-emk")
-    dataset = os.environ.get("BIGQUERY_DATASET", "fantasy")
-    free_agent_count = int(os.environ.get("FREE_AGENT_COUNT", "100"))
-    history_seasons = int(os.environ.get("HISTORY_SEASONS", "3"))
 
-    league = build_league()
-    ingested_at = datetime.now(UTC)
-    snapshot_date = ingested_at.date()
-    current_matchup_period = league.currentMatchupPeriod
-    free_agents = league.free_agents(size=free_agent_count)
+class Config:
+    def __init__(self, env=os.environ):
+        self.project = env["GCP_PROJECT_ID"]
+        self.dataset = env.get("BIGQUERY_DATASET", "league_lab")
+        self.location = env.get("BIGQUERY_LOCATION", "us-west1")
+        self.season = int(env["SEASON"])
+        self.free_agents = int(env.get("FREE_AGENT_COUNT", "100"))
+        self.history_seasons = int(env.get("HISTORY_SEASONS", "3"))
+        ids = env.get("LEAGUE_IDS", "").strip()
+        self.only_ids = {int(i) for i in ids.split(",") if i.strip()} if ids else None
+        self.purge_only = env.get("PURGE_ONLY") == "1"
+        self.task_index = int(env.get("CLOUD_RUN_TASK_INDEX", "0"))
+        self.task_count = int(env.get("CLOUD_RUN_TASK_COUNT", "1"))
 
-    # Health details and games-played history for the whole pool (rostered players
-    # + free agents), straight from ESPN's player records.
-    pool_ids = sorted(
-        {p.playerId for team in league.teams for p in team.roster}
-        | {p.playerId for p in free_agents}
+
+def missing_history(client, cfg, player_ids) -> dict[int, list[int]]:
+    """{past season: player ids with no player_seasons row yet}."""
+    seasons = list(range(cfg.season - cfg.history_seasons, cfg.season))
+    if not player_ids:
+        return {}
+    seen = client.query(
+        f"SELECT player_id, history_season FROM `{cfg.project}.{cfg.dataset}.player_seasons` "
+        f"WHERE {in_list('player_id', player_ids)} AND {in_list('history_season', seasons)}"
+    ).result()
+    have = {(row.player_id, row.history_season) for row in seen}
+    return {s: [p for p in player_ids if (p, s) not in have] for s in seasons}
+
+
+def ingest_league(league_doc: dict, client, db, cfg: Config, now: dt.datetime) -> dict:
+    """Refresh one league; returns the registry fields to record."""
+    league_id = league_doc["league_id"]
+    season = int(league_doc.get("season") or cfg.season)
+    cookies = cookies_for(league_doc, cfg.project)
+
+    raw = fetch_settings(league_id, season, cookies)
+    categories = league_categories(raw["scoringSettings"])
+    league = build_league(league_id, season, cookies)
+    current = league.currentMatchupPeriod
+    # Weeks before the previous one are final; re-fetch only the last two.
+    first = max(1, int(league_doc.get("scores_final_through") or 0) + 1)
+    periods = list(range(first, current + 1))
+    free_agents = polite(lambda: league.free_agents(size=cfg.free_agents))
+    rostered = [p for team in league.teams for p in team.roster]
+    pool_ids = sorted({p.playerId for p in rostered} | {p.playerId for p in free_agents})
+    topics = fetch_activity(
+        league_id, season, int(league_doc.get("activity_through_ms") or 0), cookies
     )
-    current_records = fetch_player_info(season, pool_ids)
-    history = {s: fetch_player_info(s, pool_ids) for s in range(season - history_seasons, season)}
+    details = fetch_player_info(league_id, season, pool_ids, cookies)
+    history = {
+        s: (ids, fetch_player_history(s, ids) if ids else [])
+        for s, ids in missing_history(client, cfg, pool_ids).items()
+    }
 
-    client = bigquery.Client(project=project)
+    def load(table, df, extra=""):
+        return replace_rows(
+            client, cfg.project, cfg.dataset, table, df, league_scope(league_id, extra)
+        )
 
-    loads = [
-        (
-            "teams",
-            transform_teams(league, season, snapshot_date, ingested_at),
-            ["season", "snapshot_date", "team_id"],
-        ),
-        (
-            "matchup_categories",
-            transform_matchup_categories(league, season, current_matchup_period, ingested_at),
-            ["season", "matchup_period", "team_id", "category"],
-        ),
-        (
-            "rosters",
-            transform_rosters(league, season, snapshot_date, ingested_at),
-            ["season", "snapshot_date", "team_id", "player_id"],
-        ),
-        (
-            "player_stats",
-            transform_player_stats(league, season, snapshot_date, ingested_at, free_agents),
-            ["season", "snapshot_date", "player_id", "stat_window"],
-        ),
-        (
-            "transactions",
-            transform_transactions(fetch_activity(league), season, ingested_at, league.player_map),
-            ["txn_id"],
-        ),
-        (
-            "free_agents",
-            transform_free_agents(free_agents, season, snapshot_date, ingested_at),
-            ["season", "snapshot_date", "player_id"],
-        ),
-        (
-            "player_details",
-            transform_player_details(current_records, season, snapshot_date, ingested_at),
-            ["season", "snapshot_date", "player_id"],
-        ),
-        (
-            "player_seasons",
-            transform_player_seasons(history, season, ingested_at),
-            ["season", "player_id", "history_season"],
-        ),
-        (
-            "league_status",
-            transform_league_status(league, season, snapshot_date, ingested_at),
-            ["season", "snapshot_date"],
-        ),
-    ]
+    settings = transform_league_settings(league, raw, league_id, season, now)
+    load("league_settings", settings)
+    load("league_categories", transform_league_categories(categories, league_id, season, now))
+    teams = transform_teams(league, league_id, season, now)
+    load("teams", teams)
+    load(
+        "matchup_categories",
+        transform_matchup_categories(league, periods, league_id, season, now),
+        f"season = {season} AND {in_list('matchup_period', periods)}",
+    )
+    load("rosters", transform_rosters(league, league_id, season, now))
+    load("free_agents", transform_free_agents(free_agents, league_id, season, now))
+    load("player_stats", transform_player_stats(rostered + free_agents, league_id, season, now))
+    load("player_details", transform_player_details(details, league_id, season, now))
+    names = {p.playerId: p.name for p in rostered + free_agents} | dict(league.player_map)
+    new_txns = transform_transactions(topics, names, league_id, season, now)
+    if not new_txns.empty:
+        load("transactions", new_txns, in_list("txn_id", list(new_txns["txn_id"])))
+    for past_season, (ids, records) in history.items():
+        if ids:
+            replace_rows(
+                client, cfg.project, cfg.dataset, "player_seasons",
+                transform_player_seasons({past_season: records}, ids, now),
+                f"{in_list('player_id', ids)} AND history_season = {past_season}",
+            )  # fmt: skip
 
-    # Tables keyed by snapshot_date hold one complete picture per day: this run
-    # replaces the day's rows rather than only adding to them.
-    today = {"season": season, "snapshot_date": snapshot_date}
-    for table, df, key_columns in loads:
-        scope = today if "snapshot_date" in key_columns else None
-        merge_load(client, project, dataset, table, df, key_columns, scope)
+    return {
+        "league_name": raw.get("name"),
+        "season": season,
+        "scoring_type": raw["scoringSettings"]["scoringType"],
+        "categories": categories,
+        "teams": [  # plain Python values: Firestore can't store numpy types
+            {"team_id": int(t.team_id), "team_name": str(n), "owner": o}
+            for t, n, o in zip(league.teams, teams["team_name"], teams["owner"], strict=True)
+        ],
+        "current_matchup_period": current,
+        "reg_season_matchup_periods": int(settings["reg_season_matchup_periods"].iloc[0]),
+        "scores_final_through": max(0, current - 2),
+        "activity_through_ms": max(
+            [t["date"] for t in topics] + [int(league_doc.get("activity_through_ms") or 0)]
+        ),
+        "last_ingested_at": now,
+    }
 
-    print("Ingest complete.")
+
+def purge_league(league_doc: dict, client, db, cfg: Config) -> None:
+    """Delete every row, registry entry and stored credential of a deleted league."""
+    league_id = league_doc["league_id"]
+    tables = LEAGUE_TABLES + [table_for(v) for v in MATERIALIZED_VIEWS]
+    script = ";\n".join(
+        f"DELETE FROM `{cfg.project}.{cfg.dataset}.{t}` WHERE league_id = {int(league_id)}"
+        for t in tables
+    )
+    client.query(script).result()
+    source = league_doc.get("credentials") or "public"
+    if source.startswith("secret:"):
+        from google.cloud import secretmanager  # only needed once private leagues exist
+
+        secretmanager.SecretManagerServiceClient().delete_secret(
+            name=f"projects/{cfg.project}/secrets/{source.removeprefix('secret:')}"
+        )
+    registry.delete_league(db, league_id)
+    print(f"league {league_id}: purged")
+
+
+def main(env=os.environ) -> int:
+    cfg = Config(env)
+    client = bigquery.Client(project=cfg.project, location=cfg.location)
+    db = registry.client(cfg.project)
+    now = dt.datetime.now(dt.UTC)
+
+    if cfg.task_index == 0:
+        for league_doc in registry.leagues_to_purge(db):
+            purge_league(league_doc, client, db, cfg)
+    if cfg.purge_only:
+        return 0
+
+    leagues = registry.task_slice(
+        registry.leagues_to_refresh(db, now, cfg.only_ids), cfg.task_index, cfg.task_count
+    )
+    print(f"task {cfg.task_index}/{cfg.task_count}: {len(leagues)} league(s)")
+    done, failed = [], []
+    for position, league_doc in enumerate(leagues):
+        if position:
+            time.sleep(random.uniform(*STAGGER_SECONDS))  # spread load on ESPN
+        league_id = league_doc["league_id"]
+        try:
+            fields = ingest_league(league_doc, client, db, cfg, now)
+            registry.record_success(db, league_id, fields)
+            done.append(league_id)
+            print(f"league {league_id}: ok")
+        except Exception as error:  # one league's failure mustn't stop the rest
+            registry.record_error(db, league_id, str(error), now)
+            failed.append(league_id)
+            print(f"league {league_id}: FAILED: {error}", file=sys.stderr)
+
+    if done:
+        script = ";\n".join(refresh_statements(cfg.project, cfg.dataset, done))
+        client.query(script).result()
+        print(f"materialized {len(done)} league(s)")
+    return 1 if failed and not done else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

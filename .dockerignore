@@ -15,7 +15,10 @@ venv/
 .pytest_cache/
 .ruff_cache/
 .DS_Store
-ingest/
+ingest/*
+!ingest/__init__.py
+!ingest/catalog.py
+!ingest/espn_client.py
 sql/
 tests/
 notebooks/

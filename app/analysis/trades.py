@@ -23,7 +23,6 @@ import pandas as pd
 from analysis.objective import category_wins, head_to_head
 from analysis.pool import contribution
 from analysis.weights import generic_values, player_values, punts
-from categories import COLUMNS
 
 LOPSIDED_GAP = 1.5  # generic value given vs received, in total z
 
@@ -40,7 +39,7 @@ def _side_delta(before: pd.DataFrame, after: pd.DataFrame, team_id: int, punted)
         row = totals.loc[team_id].to_numpy()
         return category_wins(row, totals.drop(team_id).to_numpy())
 
-    delta = pd.Series(wins(after) - wins(before), index=COLUMNS)
+    delta = pd.Series(wins(after) - wins(before), index=after.columns)
     delta[list(punted)] = 0.0
     return SideResult(team_id, delta, float(delta.sum()))
 
@@ -125,14 +124,15 @@ def _deals_with(players, totals, me, them, weights_me, weights_them):
     theirs = players.loc[(players["team_id"] == them) & ~players["is_ir"]]
     if mine.empty or theirs.empty:
         return []
-    za, zb = mine[COLUMNS].to_numpy(), theirs[COLUMNS].to_numpy()
+    cols = list(totals.columns)
+    za, zb = mine[cols].to_numpy(), theirs[cols].to_numpy()
     va = player_values(mine, weights_me).to_numpy()
     vb = player_values(theirs, weights_them).to_numpy()
     ida, idb = mine.index.to_numpy(), theirs.index.to_numpy()
     na, nb = len(ida), len(idb)
     my_pick, their_pick = best_pickup(players, weights_me), best_pickup(players, weights_them)
-    z_my_pick = players.loc[my_pick, COLUMNS].to_numpy(float) if my_pick is not None else 0
-    z_their_pick = players.loc[their_pick, COLUMNS].to_numpy(float) if their_pick is not None else 0
+    z_my_pick = players.loc[my_pick, cols].to_numpy(float) if my_pick is not None else 0
+    z_their_pick = players.loc[their_pick, cols].to_numpy(float) if their_pick is not None else 0
 
     shapes = []  # (give index tuples, get index tuples, my_drop idx|-1, their_drop idx|-1)
     for i in range(na):
@@ -151,7 +151,7 @@ def _deals_with(players, totals, me, them, weights_me, weights_them):
                 excluded[i] = True
                 shapes.append(((i,), (j1, j2), int(_lowest(va, excluded[None])[0]), -1))
 
-    my_new = np.empty((len(shapes), len(COLUMNS)))
+    my_new = np.empty((len(shapes), len(cols)))
     their_new = np.empty_like(my_new)
     t_me, t_them = totals.loc[me].to_numpy(), totals.loc[them].to_numpy()
     for k, (gi, gj, md, td) in enumerate(shapes):
@@ -184,7 +184,8 @@ def find_trades(
 ) -> pd.DataFrame:
     """Win-win deals for `me`: my E goes up and the partner's doesn't go down.
     Ranked by my change in E, then theirs."""
-    punt_me = np.isin(COLUMNS, punts(weights_by_team[me]))
+    cols = list(totals.columns)
+    punt_me = np.isin(cols, punts(weights_by_team[me]))
     base_me = category_wins(totals.loc[me].to_numpy(), totals.drop(me).to_numpy())
     generic = generic_values(players)
     rows = []
@@ -195,7 +196,7 @@ def find_trades(
         if not found:
             continue
         ids, my_new, their_new = found
-        punt_them = np.isin(COLUMNS, punts(weights_by_team[them]))
+        punt_them = np.isin(cols, punts(weights_by_team[them]))
         fixed = totals.drop([me, them]).to_numpy()
         base_them = category_wins(totals.loc[them].to_numpy(), totals.drop(them).to_numpy())
 
@@ -223,7 +224,7 @@ def find_trades(
                     "gen_give": gen_give,
                     "gen_get": gen_get,
                     "lopsided": abs(gen_give - gen_get) > LOPSIDED_GAP,
-                    **{f"dE_{c}": my_cat[k, i] for i, c in enumerate(COLUMNS)},
+                    **{f"dE_{c}": my_cat[k, i] for i, c in enumerate(cols)},
                 }
             )
     if not rows:

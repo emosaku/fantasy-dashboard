@@ -1,20 +1,18 @@
 """The scoreboard every move is judged by.
 
 E = how many categories a team would win if it played every other team, from the
-team totals; a tie counts half. With N teams the most is 9 x (N - 1). A category the
-team punts is left out of its own E, so the objective matches its strategy.
+team totals; a tie counts half. With N teams and K categories the most is K x (N - 1).
+A category the team punts is left out of its own E, so the objective matches its strategy.
 """
 
 import numpy as np
 import pandas as pd
 
-from categories import COLUMNS
-
 
 def category_wins(rows: np.ndarray, others: np.ndarray) -> np.ndarray:
     """Per-category wins of each row against every row of `others`, ties half.
 
-    rows: (..., 9). others: (M, 9). Returns (..., 9).
+    rows: (..., K). others: (M, K). Returns (..., K).
     """
     r = rows[..., None, :]
     return (r > others).sum(axis=-2) + 0.5 * (r == others).sum(axis=-2)
@@ -28,7 +26,7 @@ def head_to_head(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 def per_category_wins(totals: pd.DataFrame, team_id: int) -> pd.Series:
     me = totals.loc[team_id].to_numpy()
     others = totals.drop(team_id).to_numpy()
-    return pd.Series(category_wins(me, others), index=COLUMNS)
+    return pd.Series(category_wins(me, others), index=totals.columns)
 
 
 def expected_category_wins(totals: pd.DataFrame, team_id: int, punts=()) -> float:
@@ -38,7 +36,7 @@ def expected_category_wins(totals: pd.DataFrame, team_id: int, punts=()) -> floa
 
 def matchup_record(totals: pd.DataFrame, team_id: int) -> tuple[int, int, int]:
     """All-play matchup record: against each opponent, a win means taking more of the
-    9 categories than it does -- the way a real Most Categories week is decided.
+    categories than it does -- the way a real Most Categories week is decided.
     Every category counts here, punted or not, because a real matchup counts them."""
     me = totals.loc[team_id].to_numpy()
     wins = losses = ties = 0
