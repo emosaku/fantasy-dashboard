@@ -5,6 +5,8 @@ in E per category. find_trades searches every 1-for-1 and 2-for-1 deal (both
 directions) with every other team, vectorized over team-total arrays -- a deal only
 changes two teams' rows -- and keeps the win-win ones. The Mock trade tab runs
 simulate_trade on the same inputs, so a loaded deal shows the same numbers.
+deals_for_target builds the same deals around one player I want (2-for-2 included)
+and sorts them by how likely the other manager is to accept.
 
 Roster size stays even on both sides. The side receiving two players for one drops
 its lowest-valued remaining player (by its own weights), never one it just received.
@@ -131,8 +133,9 @@ def _lowest(values: np.ndarray, excluded: np.ndarray) -> np.ndarray:
     return masked.argmin(axis=1)
 
 
-def _deals_with(players, totals, me, them, weights_me, weights_them):
-    """Every 1-for-1 and 2-for-1 deal with one partner, as arrays."""
+def _deals_with(players, totals, me, them, weights_me, weights_them, target=None):
+    """Every 1-for-1 and 2-for-1 deal with one partner, as arrays. With a `target`
+    (one of their players): only deals that bring him to me, 2-for-2 included."""
     mine = players.loc[(players["team_id"] == me) & ~players["is_ir"]]
     theirs = players.loc[(players["team_id"] == them) & ~players["is_ir"]]
     if mine.empty or theirs.empty:
@@ -146,6 +149,13 @@ def _deals_with(players, totals, me, them, weights_me, weights_them):
     my_pick, their_pick = best_pickup(players, weights_me), best_pickup(players, weights_them)
     z_my_pick = players.loc[my_pick, cols].to_numpy(float) if my_pick is not None else 0
     z_their_pick = players.loc[their_pick, cols].to_numpy(float) if their_pick is not None else 0
+
+    if target is not None:
+        if target not in set(idb):
+            return []
+        shapes = _target_shapes(int(np.flatnonzero(idb == target)[0]), na, nb, va, vb)
+        return _evaluate(shapes, za, zb, ida, idb, totals, me, them, my_pick, their_pick,
+                         z_my_pick, z_their_pick)  # fmt: skip
 
     shapes = []  # (give index tuples, get index tuples, my_drop idx|-1, their_drop idx|-1)
     for i in range(na):
@@ -163,8 +173,36 @@ def _deals_with(players, totals, me, them, weights_me, weights_them):
                 excluded = np.zeros(na, bool)
                 excluded[i] = True
                 shapes.append(((i,), (j1, j2), int(_lowest(va, excluded[None])[0]), -1))
+    return _evaluate(
+        shapes, za, zb, ida, idb, totals, me, them, my_pick, their_pick, z_my_pick, z_their_pick
+    )
 
-    my_new = np.empty((len(shapes), len(cols)))
+
+def _target_shapes(j0: int, na: int, nb: int, va, vb) -> list:
+    """Deals that bring their player j0 to me: 1-for-1, 2-for-1 (they drop their
+    least useful other player), 1-for-2 (j0 plus one more; I drop my least useful
+    remaining player) and 2-for-2 (rosters stay even, nobody drops)."""
+    shapes = [((i,), (j0,), -1, -1) for i in range(na)]
+    if nb > 1:
+        excluded = np.zeros(nb, bool)
+        excluded[j0] = True
+        their_drop = int(_lowest(vb, excluded[None])[0])
+        shapes += [((i1, i2), (j0,), -1, their_drop) for i1, i2 in combinations(range(na), 2)]
+    others = [j for j in range(nb) if j != j0]
+    if na > 1:
+        for i in range(na):
+            excluded = np.zeros(na, bool)
+            excluded[i] = True
+            my_drop = int(_lowest(va, excluded[None])[0])
+            shapes += [((i,), (j0, j), my_drop, -1) for j in others]
+    shapes += [((i1, i2), (j0, j), -1, -1) for i1, i2 in combinations(range(na), 2) for j in others]
+    return shapes
+
+
+def _evaluate(shapes, za, zb, ida, idb, totals, me, them, my_pick, their_pick, z_my_pick,
+              z_their_pick):  # fmt: skip
+    """Both teams' totals after each deal shape, and the deals as player ids."""
+    my_new = np.empty((len(shapes), za.shape[1]))
     their_new = np.empty_like(my_new)
     t_me, t_them = totals.loc[me].to_numpy(), totals.loc[them].to_numpy()
     for k, (gi, gj, md, td) in enumerate(shapes):
@@ -198,8 +236,6 @@ def find_trades(
     """Win-win deals for `me`: my E goes up and the partner's doesn't go down.
     Ranked by my change in E, then theirs."""
     cols = list(totals.columns)
-    punt_me = np.isin(cols, punts(weights_by_team[me]))
-    base_me = category_wins(totals.loc[me].to_numpy(), totals.drop(me).to_numpy())
     generic = generic_values(players)
     rows = []
     for them in totals.index:
@@ -209,14 +245,9 @@ def find_trades(
         if not found:
             continue
         ids, my_new, their_new = found
-        punt_them = np.isin(cols, punts(weights_by_team[them]))
-        fixed = totals.drop([me, them]).to_numpy()
-        base_them = category_wins(totals.loc[them].to_numpy(), totals.drop(them).to_numpy())
-
-        my_cat = category_wins(my_new, fixed) + head_to_head(my_new, their_new) - base_me
-        their_cat = category_wins(their_new, fixed) + head_to_head(their_new, my_new) - base_them
-        my_cat[:, punt_me] = 0.0
-        their_cat[:, punt_them] = 0.0
+        my_cat, their_cat = _category_changes(
+            totals, me, them, my_new, their_new, weights_by_team[me], weights_by_team[them]
+        )
         d_me, d_them = my_cat.sum(1), their_cat.sum(1)
 
         keep = np.flatnonzero((d_me > 1e-9) & (d_them > -1e-9))
@@ -244,6 +275,98 @@ def find_trades(
         return pd.DataFrame()
     deals = pd.DataFrame(rows).sort_values(["dE_me", "dE_them"], ascending=False)
     return deals.head(top).reset_index(drop=True)
+
+
+def _category_changes(totals, me, them, my_new, their_new, weights_me, weights_them):
+    """Each deal's change in category wins per category, for me and for them (each
+    side's punted categories zeroed). Only the two teams' rows change."""
+    fixed = totals.drop([me, them]).to_numpy()
+    base_me = category_wins(totals.loc[me].to_numpy(), totals.drop(me).to_numpy())
+    base_them = category_wins(totals.loc[them].to_numpy(), totals.drop(them).to_numpy())
+    my_cat = category_wins(my_new, fixed) + head_to_head(my_new, their_new) - base_me
+    their_cat = category_wins(their_new, fixed) + head_to_head(their_new, my_new) - base_them
+    cols = list(totals.columns)
+    my_cat[:, np.isin(cols, punts(weights_me))] = 0.0
+    their_cat[:, np.isin(cols, punts(weights_them))] = 0.0
+    return my_cat, their_cat
+
+
+# How likely the other manager is to accept a deal for a target, best first.
+LIKELY, COSTS_YOU, THEY_SAY_NO = "likely", "costs_you", "they_say_no"
+STATUS_ORDER = {LIKELY: 0, COSTS_YOU: 1, THEY_SAY_NO: 2}
+
+
+def deals_for_target(
+    players: pd.DataFrame, totals: pd.DataFrame, me: int, target, weights_by_team: dict
+) -> pd.DataFrame:
+    """Every 1-for-1, 2-for-1, 1-for-2 and 2-for-2 deal that brings `target` (a player
+    on another roster) to me, with a status:
+
+      likely       -- I gain category wins, they don't lose any, and the general value
+                      I get isn't more than LOPSIDED_GAP above what I give;
+      costs_you    -- they'd accept on the same tests, but I don't gain: the price of
+                      the player;
+      they_say_no  -- I gain, but they lose category wins or the deal is lopsided in
+                      my favor.
+
+    Deals that neither side gains from are left out. Sorted by status; within
+    `likely` by my gain, then the least general value given up (keep your best
+    players); `costs_you` by my change (cheapest first); `they_say_no` by how close
+    they come to accepting."""
+    them = int(players.at[target, "team_id"])
+    found = _deals_with(
+        players, totals, me, them, weights_by_team[me], weights_by_team[them], target=target
+    )
+    if not found:
+        return pd.DataFrame()
+    ids, my_new, their_new = found
+    my_cat, their_cat = _category_changes(
+        totals, me, them, my_new, their_new, weights_by_team[me], weights_by_team[them]
+    )
+    d_me, d_them = my_cat.sum(1), their_cat.sum(1)
+    generic = generic_values(players)
+    rows = []
+    for k, (give, get, my_drop, their_drop, my_add, their_add) in enumerate(ids):
+        gen_give, gen_get = generic[list(give)].sum(), generic[list(get)].sum()
+        fair = gen_get - gen_give <= LOPSIDED_GAP
+        accepts = d_them[k] > -1e-9 and fair
+        gains = d_me[k] > 1e-9
+        if gains and accepts:
+            status = LIKELY
+        elif accepts:
+            status = COSTS_YOU
+        elif gains:
+            status = THEY_SAY_NO
+        else:
+            continue
+        rows.append(
+            {
+                "status": status,
+                "partner_id": them,
+                "give_ids": give,
+                "get_ids": get,
+                "my_drop_id": my_drop,
+                "their_drop_id": their_drop,
+                "my_add_id": my_add,
+                "their_add_id": their_add,
+                "dE_me": d_me[k],
+                "dE_them": d_them[k],
+                "gen_give": gen_give,
+                "gen_get": gen_get,
+                "lopsided": abs(gen_give - gen_get) > LOPSIDED_GAP,
+                **{f"dE_{c}": my_cat[k, i] for i, c in enumerate(totals.columns)},
+            }
+        )
+    if not rows:
+        return pd.DataFrame()
+    deals = pd.DataFrame(rows)
+    order = deals["status"].map(STATUS_ORDER)
+    # One sort key per status, so each group is ordered by what matters for it.
+    key = np.where(
+        deals["status"] == THEY_SAY_NO, -deals["dE_them"] * 100 - deals["dE_me"], -deals["dE_me"]
+    )
+    deals = deals.assign(_order=order, _key=key).sort_values(["_order", "_key", "gen_give"])
+    return deals.drop(columns=["_order", "_key"]).reset_index(drop=True)
 
 
 def top_targets(players, me, weights_me, n=10) -> pd.DataFrame:

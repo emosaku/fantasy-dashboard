@@ -8,7 +8,16 @@ import pytest
 from analysis.explain import explain
 from analysis.objective import expected_category_wins, matchup_record
 from analysis.pool import empty_slot_z, team_totals
-from analysis.trades import apply_trade, as_ids, find_trades, simulate_trade
+from analysis.trades import (
+    LIKELY,
+    STATUS_ORDER,
+    THEY_SAY_NO,
+    apply_trade,
+    as_ids,
+    deals_for_target,
+    find_trades,
+    simulate_trade,
+)
 from analysis.waivers import rank_pickups, rank_waiver_moves
 from analysis.weights import compute_weights, punts
 from tests.fixtures.four_team_league import COLUMNS, build_players
@@ -269,3 +278,69 @@ def test_a_plain_add_gains_against_the_empty_spot(players, totals):
     _, short, _ = simulate_trade(players, totals, 3, 2, [30, 31], [20], punts_me=pm, empty=empty)
     assert filled.delta_e - short.delta_e == pytest.approx(best["dE"])
     assert best["dE"] > 0
+
+
+# --- Create a trade: deals built around one player I want -------------------------
+
+
+@pytest.mark.parametrize("target", [20, 21, 30, 43])
+def test_every_deal_brings_the_target_and_only_my_own_players_go(players, totals, target):
+    deals = deals_for_target(players, totals, 2 if target != 21 else 3, target,
+                             all_weights(totals))  # fmt: skip
+    assert not deals.empty
+    me = 2 if target != 21 else 3
+    for deal in deals.itertuples():
+        assert target in deal.get_ids
+        assert all(players.at[p, "team_id"] == me for p in deal.give_ids)
+        assert all(players.at[p, "team_id"] == deal.partner_id for p in deal.get_ids)
+        assert 41 not in deal.give_ids + deal.get_ids  # IR players aren't traded
+
+
+def test_all_four_deal_sizes_are_built(players, totals):
+    weights = all_weights(totals)
+    deals = deals_for_target(players, totals, 3, 20, weights)
+    sizes = {(len(d.give_ids), len(d.get_ids)) for d in deals.itertuples()}
+    assert sizes <= {(1, 1), (2, 1), (1, 2), (2, 2)}
+    assert {(1, 1), (2, 2)} <= sizes  # 2-for-2 is new here: the finder doesn't build it
+
+
+def test_rosters_stay_full_like_the_trade_finder(players, totals):
+    deals = deals_for_target(players, totals, 3, 20, all_weights(totals))
+    for d in deals.itertuples():
+        gave, got = len(d.give_ids), len(d.get_ids)
+        assert pd.notna(d.my_add_id) == (gave > got)  # short -> best free agent
+        assert pd.notna(d.their_add_id) == (got > gave)
+        assert pd.notna(d.my_drop_id) == (got > gave)  # extra player -> drop one
+        assert pd.notna(d.their_drop_id) == (gave > got)
+        if pd.notna(d.my_drop_id):
+            assert d.my_drop_id not in d.give_ids
+
+
+def test_status_matches_both_sides_and_sorts_likely_first(players, totals):
+    deals = deals_for_target(players, totals, 3, 20, all_weights(totals))
+    assert list(deals["status"].map(STATUS_ORDER)) == sorted(deals["status"].map(STATUS_ORDER))
+    likely = deals.loc[deals["status"] == LIKELY]
+    assert (likely["dE_me"] > 0).all() and (likely["dE_them"] >= 0).all()
+    assert (likely["gen_get"] - likely["gen_give"] <= 1.5).all()
+    assert list(likely["dE_me"]) == sorted(likely["dE_me"], reverse=True)
+    no = deals.loc[deals["status"] == THEY_SAY_NO]
+    assert (no["dE_me"] > 0).all()
+
+
+def test_a_deal_scores_the_same_in_the_mock_trade(players, totals):
+    weights = all_weights(totals)
+    deals = deals_for_target(players, totals, 3, 20, weights)
+    for d in deals.head(10).itertuples():
+        _, mine, theirs = simulate_trade(
+            players, totals, 3, 2, list(d.give_ids), list(d.get_ids),
+            d.my_drop_id, d.their_drop_id, d.my_add_id, d.their_add_id,
+            punts(weights[3]), punts(weights[2]),
+        )  # fmt: skip
+        assert mine.delta_e == pytest.approx(d.dE_me)
+        assert theirs.delta_e == pytest.approx(d.dE_them)
+
+
+def test_trade_finder_is_unchanged_by_the_shared_code(players, totals):
+    deals = find_trades(players, totals, 2, all_weights(totals), top=1000)
+    assert not deals.empty
+    assert ((deals["dE_me"] > 0) & (deals["dE_them"] >= 0)).all()
