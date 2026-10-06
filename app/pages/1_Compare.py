@@ -23,13 +23,19 @@ import analyzer
 import login
 import queries
 import ui
+from analysis.weights import player_fit as fit_from_weights
 from categories import CATEGORIES, COLUMNS, LABELS, PCT_PARTS, fmt
 from compare import (
+    POSITIONS,
+    baseline_id,
     head_to_head,
     head_to_head_verdict,
     period_lines,
     player_compare_frame,
     pool_window_frame,
+    position_baseline,
+    season_totals,
+    starter_ids,
     zscores,
 )
 from health import games_by_season_text, health_text
@@ -250,24 +256,70 @@ else:  # Players
         max_selections=4,
         key="compare-picker",
         placeholder="Type a player's name...",
-        help="2-4 players, rostered or free agent. Narrow the list with the chips above.",
+        help="Up to 4 players, rostered or free agent. Narrow the list with the chips above.",
     )
-    if len(picked) < 2:
-        st.info("Pick 2-4 players to compare.")
+
+    o1, o2 = st.columns(2)
+    sticky_default("compare-baseline", None)
+    baseline_pos = o1.selectbox(
+        "Compare against",
+        [None, *POSITIONS],
+        format_func=lambda p: "No position baseline" if p is None else f"Average starting {p}",
+        key="compare-baseline",
+        help="The average of every rostered player at that position in an active "
+        "lineup slot (not bench or IR) -- a typical starter to measure against.",
+    )
+    sticky_save("compare-baseline", baseline_pos)
+    sticky_default("compare-basis", "Per game")
+    basis = o2.segmented_control(
+        "Show",
+        ["Per game", "Season totals"],
+        key="compare-basis",
+        required=True,
+        help="Season totals: per-game stats times games played in this window (projected "
+        "games for Projected), so a player who plays 70 games counts for more than one "
+        "who plays 40.",
+    )
+    sticky_save("compare-basis", basis)
+    use_totals = basis == "Season totals"
+
+    entities = list(picked)
+    groups: dict[int, list[int]] = {}
+    pname = {pid: info.loc[pid, "player_name"] if pid in info.index else str(pid) for pid in picked}
+    if baseline_pos:
+        members = starter_ids(z_all, window, baseline_pos)
+        if members:
+            bid = baseline_id(baseline_pos)
+            entities.append(bid)
+            groups[bid] = members
+            pname[bid] = f"Avg starting {baseline_pos}"
+        else:
+            st.caption(f"No starting {baseline_pos}s in this stat window.")
+    if len(entities) < 2:
+        st.info("Pick 2-4 players, or 1 player and a position baseline.")
         st.stop()
 
     frame = player_compare_frame(z_all, pool_all, picked, window)
-    c = ui.colors()
-    palette = c["series4"]
-    dashes = ["solid", "dash", "dot", "dashdot"]
-    symbols = ["circle", "square", "diamond", "triangle-up"]
-    pcolor = dict(zip(picked, palette, strict=False))
-    pdash = dict(zip(picked, dashes, strict=False))
-    psymbol = dict(zip(picked, symbols, strict=False))
-    pname = {pid: info.loc[pid, "player_name"] if pid in info.index else str(pid) for pid in picked}
+    for bid in groups:
+        frame = pd.concat(
+            [frame, position_baseline(z_all, pool_all, window, baseline_pos)], ignore_index=True
+        )
+    frame = frame.merge(
+        season_totals(pool_all, window, entities, groups), on=["player_id", "category"], how="left"
+    )
+    score_col = "total_score" if use_totals else "z"
 
-    if len(picked) == 2:
-        st.markdown(f"**{head_to_head_verdict(frame, pname)}**")
+    c = ui.colors()
+    pcolor = dict(zip(picked, c["series4"], strict=False))
+    pdash = dict(zip(picked, ["solid", "dash", "dot", "dashdot"], strict=False))
+    psymbol = dict(zip(picked, ["circle", "square", "diamond", "triangle-up"], strict=False))
+    for bid in groups:
+        pcolor[bid], pdash[bid], psymbol[bid] = c["baseline"], "longdash", "star"
+
+    if len(entities) == 2:
+        st.markdown(f"**{head_to_head_verdict(frame, pname, by=score_col)}**")
+        if use_totals:
+            st.caption("Judged on season totals: games played count.")
 
     # --- Block 1: category radar (or, on a narrow screen, grouped bars) -------------
     st.subheader("Category profile")
@@ -284,15 +336,19 @@ else:  # Players
         required=True,
     )
     sticky_save("compare-chart-kind", chart_kind)
+    per_game_note = (
+        " The chart is always per game; the table below shows season totals." if use_totals else ""
+    )
     CLIP = 3.0
     if chart_kind == "Radar":
         st.caption(
             "Standard deviations above (+) or below (−) the league average, clipped "
             "to ±3 so one outlier doesn't flatten the chart (hover for the true value)."
+            + per_game_note
         )
         radar = go.Figure()
         theta = [LABELS[col] for col in COLUMNS] + [LABELS[COLUMNS[0]]]
-        for pid in picked:
+        for pid in entities:
             raw = pivot_z.loc[pid].fillna(0.0).tolist() if pid in pivot_z.index else [0.0] * 9
             clipped = [max(-CLIP, min(CLIP, v)) for v in raw]
             radar.add_trace(
@@ -327,9 +383,9 @@ else:  # Players
         )
         ui.show(ui.style(radar, height=440))
     else:
-        st.caption("Each player's z-score per category (true value; not clipped).")
+        st.caption("Each player's z-score per category (true value; not clipped)." + per_game_note)
         bars = go.Figure()
-        for pid in picked:
+        for pid in entities:
             ys = pivot_z.loc[pid].tolist() if pid in pivot_z.index else [0.0] * 9
             bars.add_trace(
                 go.Bar(
@@ -337,7 +393,7 @@ else:  # Players
                     x=ys,
                     orientation="h",
                     name=pname[pid],
-                    marker={"color": pcolor[pid], "cornerradius": 4, "pattern": {"shape": ""}},
+                    marker={"color": pcolor[pid], "cornerradius": 4},
                     hovertemplate="%{y}: %{x:+.2f} SD<extra>" + pname[pid] + "</extra>",
                 )
             )
@@ -346,49 +402,79 @@ else:  # Players
         ui.show(ui.style(bars, height=max(360, 56 * len(COLUMNS))))
 
     # --- Block 2: stat table ---------------------------------------------------------
-    st.subheader("Stat table")
-    pool_size = len(info)
+    st.subheader("Stat table" + (" — season totals" if use_totals else " — per game"))
+
+    def cell_text(cell: pd.Series, col: str) -> str:
+        value = cell["total"] if use_totals else cell["value"]
+        rank = cell["total_rank"] if use_totals else cell["rank"]
+        den = cell["total_den"] if use_totals else cell["den"]
+        if pd.isna(value):
+            return "–"
+        if col in PCT_PARTS:
+            text = fmt(col, value)
+            if pd.notna(den) and den > 0:
+                attempts = f"{den:,.0f}" if use_totals else f"{den:.1f}"
+                text += f" on {attempts} {LABELS[col].replace('%', 'A')}"
+        else:
+            text = f"{value:,.0f}" if use_totals else fmt(col, value)
+        return text + (f" (#{int(rank)})" if pd.notna(rank) else "")
+
+    indexed = frame.set_index(["player_id", "category"])
     stat_rows = []
     for col in COLUMNS:
         row = {"": LABELS[col]}
-        values = {}
-        for pid in picked:
-            cell = frame.loc[(frame["player_id"] == pid) & (frame["category"] == col)]
-            if cell.empty or pd.isna(cell["value"].iloc[0]):
+        scores = {}
+        for pid in entities:
+            if (pid, col) not in indexed.index:
                 row[pname[pid]] = "–"
-                values[pid] = float("-inf")
                 continue
-            value, rank = cell["value"].iloc[0], cell["rank"].iloc[0]
-            text = fmt(col, value)
-            if col in PCT_PARTS:
-                num, den = cell["num"].iloc[0], cell["den"].iloc[0]
-                if pd.notna(den) and den > 0:
-                    text += f" on {den:.1f} {LABELS[col].replace('%', 'A')}"
-            text += f" (#{int(rank)})" if pd.notna(rank) else ""
-            row[pname[pid]] = text
-            values[pid] = value
-        best = max(values, key=values.get) if values else None
-        for pid in picked:
-            if pid == best and values[pid] != float("-inf"):
-                row[pname[pid]] = f"**{row[pname[pid]]}**"
+            cell = indexed.loc[(pid, col)]
+            row[pname[pid]] = cell_text(cell, col)
+            if pd.notna(cell[score_col]):
+                scores[pid] = cell[score_col]
+        if scores:
+            best = max(scores, key=scores.get)
+            if list(scores.values()).count(scores[best]) == 1:  # no bold on a tie
+                row[pname[best]] = f"**{row[pname[best]]}**"
         stat_rows.append(row)
-    footer = {"": "Overall rank"}
-    footer_z = {"": "Total z"}
+
+    pool_total_z = (
+        z_window.pivot_table(index="player_id", columns="category", values="z", aggfunc="first")
+        .reindex(columns=COLUMNS)
+        .fillna(0.0)
+        .sum(axis=1)
+    )
+    footer = {"": "Overall rank (per game)"}
+    footer_z = {"": "Total z (per game)"}
     footer_gp = {"": "Games played"}
-    for pid in picked:
-        overall = frame.loc[frame["player_id"] == pid, "z"].sum()
-        rank_series = pivot_z.rank(ascending=False, method="min").sum(axis=1).rank(
-            ascending=True, method="min"
-        )  # fmt: skip
-        footer[pname[pid]] = f"#{int(rank_series.loc[pid])}" if pid in rank_series.index else "–"
-        footer_z[pname[pid]] = f"{overall:+.2f}"
-        gp = pool_window.loc[pool_window["player_id"] == pid, "gp"]
+    for pid in entities:
+        total_z = pivot_z.loc[pid].fillna(0.0).sum() if pid in pivot_z.index else float("nan")
+        footer[pname[pid]] = (
+            f"#{int((pool_total_z > total_z).sum()) + 1}" if pd.notna(total_z) else "–"
+        )
+        footer_z[pname[pid]] = f"{total_z:+.2f}" if pd.notna(total_z) else "–"
+        gp = frame.loc[frame["player_id"] == pid, "gp"]
         footer_gp[pname[pid]] = (
             f"{gp.iloc[0]:.0f}" if not gp.empty and pd.notna(gp.iloc[0]) else "–"
         )
     table_df = pd.DataFrame([*stat_rows, footer, footer_z, footer_gp])
     st.dataframe(table_df, hide_index=True, width="stretch", height=ui.table_height(len(table_df)))
-    st.caption("The best value in each row is **bold**. Percentages show makes/attempts.")
+    st.caption(
+        "**Bold** is the best in that category -- percentages judged with volume, like "
+        "the rest of the app, so the highest percentage isn't always it. "
+        + (
+            "Ranks are among every pool player's season totals. Totals use games played in "
+            "this window (projected games for Projected)."
+            if use_totals
+            else "Ranks are league-wide, the same as Player Rankings."
+        )
+        + (
+            f" {pname[next(iter(groups))]}: the average of {len(next(iter(groups.values())))} "
+            "starters; a percentage is pooled from their makes and attempts."
+            if groups
+            else ""
+        )
+    )
 
     # --- Block 3: fit for your team --------------------------------------------------
     st.subheader("Fit for your team")
@@ -396,23 +482,28 @@ else:  # Players
         st.info("Sign in as a manager with a team to see this.")
     else:
         fit = analyzer.player_fit(window, mine, tuple(picked), 1.0, ())
+        if groups:
+            bid = next(iter(groups))
+            baseline_z = pivot_z.loc[[bid], COLUMNS].fillna(0.0)
+            weights = analyzer.weights_by_team(window, mine, 1.0, ())[mine]
+            fit = pd.concat([fit, fit_from_weights(baseline_z, [bid], weights)])
         fit_rows = []
-        for pid in picked:
+        for pid in entities:
             value = fit.at[pid, "value"] if pid in fit.index else None
             generic = fit.at[pid, "generic"] if pid in fit.index else None
             breakdown = fit.at[pid, "tier_breakdown"] if pid in fit.index else ""
             fit_rows.append(
                 {
                     "Player": pname[pid],
-                    "Value to you": f"{value:+.2f}" if value is not None else "–",
-                    "General value": f"{generic:+.2f}" if generic is not None else "–",
+                    "Value to you": f"{value:+.2f}" if pd.notna(value) else "–",
+                    "General value": f"{generic:+.2f}" if pd.notna(generic) else "–",
                     "Where his value sits": breakdown or "–",
                 }
             )
         st.dataframe(pd.DataFrame(fit_rows), hide_index=True, width="stretch")
         st.caption(
-            f"Value to you ({names.get(mine, 'your team')}) weighs each category by "
-            "your Lock/Swing/Punt tiers; general value is the same for every team."
+            f"Per game. Value to you ({names.get(mine, 'your team')}) weighs each category "
+            "by your Lock/Swing/Punt tiers; general value is the same for every team."
         )
 
     # --- Block 4: recent form ---------------------------------------------------------
@@ -423,10 +514,13 @@ else:  # Players
     else:
         form = go.Figure()
         xlabels = [analyzer.STAT_WINDOWS[w] for w in form_windows]
-        for pid in picked:
+        for pid in entities:
             ys = []
             for w in form_windows:
-                sub = z_all.loc[(z_all["stat_window"] == w) & (z_all["player_id"] == pid)]
+                if pid in groups:
+                    sub = position_baseline(z_all, pool_all, w, baseline_pos)
+                else:
+                    sub = z_all.loc[(z_all["stat_window"] == w) & (z_all["player_id"] == pid)]
                 ys.append(float(sub["z"].sum()) if not sub.empty else None)
             form.add_trace(
                 go.Scatter(
@@ -449,9 +543,18 @@ else:  # Players
     st.subheader("Health and durability")
     profile = queries.player_profile().set_index("player_id")
     health_rows = []
-    for pid in picked:
+    for pid in entities:
         row = {"Player": pname[pid]}
-        if pid in profile.index:
+        if pid in groups:
+            members = [m for m in groups[pid] if m in profile.index]
+            row |= {
+                "Health": f"Average of {len(groups[pid])} starters",
+                "Avg games (3 yrs)": profile.loc[members, "avg_games_played"].mean()
+                if members
+                else None,
+                "Games by season": "–",
+            }
+        elif pid in profile.index:
             prow = profile.loc[pid]
             row["Health"] = health_text(prow)
             row["Avg games (3 yrs)"] = prow["avg_games_played"]

@@ -10,6 +10,7 @@ Player Compare needs a 4th categorical slot (2-4 players, one color each): `seri
 stays capped at 3 for every other chart; `series4` is that plus one more step
 (a violet, furthest in hue from the other three), used only there, and paired with
 a distinct marker/line style per player so identity never rests on color alone.
+`baseline` is a neutral gray for a position average, so it never reads as a player.
 """
 
 from zoneinfo import ZoneInfo
@@ -23,6 +24,7 @@ import refresh
 LIGHT = {
     "series": ["#2a78d6", "#eb6834", "#1baf7a"],
     "series4": ["#2a78d6", "#eb6834", "#1baf7a", "#8e5ac8"],
+    "baseline": "#6f6e66",
     "negative": "#e34948",
     "positive": "#2a78d6",
     "midpoint": "#f0efec",
@@ -34,6 +36,7 @@ LIGHT = {
 DARK = {
     "series": ["#3987e5", "#d95926", "#199e70"],
     "series4": ["#3987e5", "#d95926", "#199e70", "#a878e0"],
+    "baseline": "#a3a29b",
     "negative": "#e66767",
     "positive": "#3987e5",
     "midpoint": "#383835",

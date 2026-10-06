@@ -15,8 +15,9 @@ What the dashboard does:
 
 - **Compare** — any two teams, category by category, for a week or the season; a
   **Players** mode compares 2-4 players (rostered or free agent) head to head: a
-  radar/bars chart, a ranked stat table, each player's fit for your team, recent
-  form, and health/durability. Opens pre-loaded from Player Rankings or the Trade
+  radar/bars chart, a ranked stat table (per game or season totals), each player's
+  fit for your team, recent form, and health/durability, optionally against an
+  average starter at a position. Opens pre-loaded from Player Rankings or the Trade
   Analyzer
 - **Power Rankings** — all-play rankings (your record if you'd played everyone every
   week), plus an injury-aware projected finish through the end of the regular season

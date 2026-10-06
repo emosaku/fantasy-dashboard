@@ -407,6 +407,16 @@ rank and value always match what those pages show.
 - With exactly 2 players, a one-line verdict ("Player A wins 6 of 9 categories;
   Player B is better in FT%, 3PT% and STL"), counted by z (not the raw percentage,
   so volume is judged the same way as everywhere else on the page).
+- **Per game / Season totals** toggle *(added)*: totals are per-game stats times
+  games played in the stat window (projected games for Projected), so a 70-game
+  player counts for more than a 40-game one. Percentages come from season makes and
+  attempts; totals are ranked among every pool player's totals, and the verdict and
+  bolding switch to totals too. The charts and the fit row stay per game.
+- **Position baseline** *(added)*: "Compare against: average starting PG/SG/SF/PF/C"
+  -- the mean of every rostered player at that position in an active lineup slot
+  (not bench or IR; 17-31 per position in this league). It's a full row everywhere
+  (chart, table with the rank its z would hold, fit, form, a durability average)
+  drawn in neutral gray, so one player can be measured against a typical starter.
 
 A fourth categorical color (`ui.py`'s `series` palette only defines 3) was added for
 the 4-player case, paired with a distinct line/marker style per player so identity
