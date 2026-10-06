@@ -59,7 +59,7 @@ BigQuery views (Step 5)
 | **Matchups and Luck** | week picker | one scoreboard card per matchup (winner named, higher value bold); season-to-date luck bar chart; luck table | `v_luck`, `v_team_week_cats` |
 | **Transactions** | dates, teams, actions, players (one filter bar for the chart and the log) | stacked activity per team with counts (adds, drops, trades, lineup moves); activity log of every matching row, lineup moves with their slots | `v_transactions` |
 | **Roster Strength** | Category rankings tab: lens (roster strength / results), stat window, highlighted team (yours by default), sort. Per-game totals tab: stat window | rankings grid (rank per team × category plus average rank, the highlighted team outlined with Lock / Swing / Punt) and a category detail bar chart; per-game heatmap | `v_category_ranks`, `v_roster_strength` |
-| **Trade Analyzer** | team (locked to yours unless admin), stat window, swing size δ, tier overrides | four tabs: Team profile; Waiver wire; Trade finder (win-win deals, top targets, trade chips); Mock trade | `v_player_z`, `v_player_pool`, `v_player_profile` |
+| **Trade Analyzer** | team (locked to yours unless admin), stat window, swing size δ, tier overrides | five tabs: Team profile; Waiver wire; Trade finder (win-win deals, top targets, trade chips); Create a Trade (search by player, or Offer Builder from your own trade block); Mock trade | `v_player_z`, `v_player_pool`, `v_player_profile` |
 | **Player Rankings** | stat window; players (all, your team, free agents, any team); show ranks, per-game values or z-scores; name search; positions; hide injured | one table of every pool player: overall rank and rank in each of the 9 categories, shaded blue (1st) to red (last) like the team grid; team, position and health. Ranks are league-wide, so filters don't change them; columns sort; Player stays pinned when a phone swipes sideways | `v_player_z` |
 
 ### Choices made along the way
@@ -107,9 +107,32 @@ The math lives in `app/analysis/` and is tested on a synthetic 4-team league.
   gives two picks up the best free agent. Lopsided deals (general value differs by
   more than 1.5 z) are hidden by default; deal sizes can be filtered. The full search
   takes about 0.6 seconds. Top targets and trade chips sit below.
-- **Mock trade:** pick any players from both sides with dropdowns (or load any waiver
-  or trade row with **Load into mock trade** — dropdowns because Streamlit can't
-  pre-select table rows from code). It shows:
+- **Create a Trade:** two ways to build a deal, sharing the finder's scoring so a
+  loaded deal matches the row's numbers:
+  - *Search by player:* type a player on another roster; every 1-for-1, 2-for-1,
+    1-for-2 and 2-for-2 that brings him over, labeled Likely to work / Costs you /
+    They'd likely say no.
+  - *Offer Builder* *(added later)*: pick your own trade block (up to 6 players,
+    each noted if its value sits mostly in a Lock or Punt category) and a target
+    team or "Any team," cap how many players either side gives, and choose an
+    acceptance level — Win-win, Close call (costs the partner up to 2 E, not
+    Lopsided) or Max gain (no limit, Lopsided deals flagged). Every deal up to
+    3-for-3 is enumerated (a combinatorics guard refuses a search over 250,000
+    deals before building any of it), balanced the same way the finder balances a
+    2-for-1, and ranked by your gain. Each result expands into the usual plain-text
+    "why it helps you," plus a **pitch** written from the partner's side of the same
+    numbers — never a model, just the per-category deltas phrased the other way —
+    and a **Load into mock trade** button. At most 3 offers per partner when
+    searching every team, so one team can't fill the list.
+- **Mock trade:** pick any players from both sides with dropdowns (or load any
+  waiver, trade or offer row with **Load into mock trade** — dropdowns because
+  Streamlit can't pre-select table rows from code). Beyond the trade itself, **Your
+  other moves** lets you add any number of free agents and drop any number of your
+  own players around it (the partner's own optional add/drop sit in a collapsed
+  section, now also multi-select so an uneven Offer Builder deal can be fully
+  represented); **Suggest a pickup** ranks free agents for the roster the move
+  leaves you and adds one with a click; a **step-by-step** table shows E and
+  matchup record at Now / Trade only / Trade + your moves. It also shows:
   - **Players in this deal:** each player's move, health (ESPN status and return
     date), average games played over the last 3 seasons and each season's count, and
     his 9 per-game categories; ESPN's season outlook for each in an expander
@@ -118,6 +141,10 @@ The math lives in `app/analysis/` and is tested on a synthetic 4-team league.
     finder uses, so a loaded deal shows the row's numbers exactly
   - per-game roster totals before and after, ▲/▼ marked so direction never relies on
     color alone
+- **An empty roster spot scores as a player with no stats**, not an average player,
+  whenever a move changes roster size (a 2-for-1, an uneven Offer Builder deal, a
+  plain pickup) — otherwise a 2-for-1 looked better than it was and every pickup
+  into an open spot looked worthless.
 - **IR players count for nothing** in team totals, the same rule as Roster Strength.
 
 ## Logins

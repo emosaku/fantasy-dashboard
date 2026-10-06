@@ -23,8 +23,11 @@ What the dashboard does:
 - **Roster Strength** — category rankings 1-14 for every team (roster strength or
   actual results), with Lock / Swing / Punt tiers, and per-game totals
 - **Trade Analyzer** — for the signed-in manager's team: waiver pickups and win-win
-  trades ranked by category wins gained, with plain-text explanations, and a mock-trade
-  simulator showing health and games-played history for every player in the deal
+  trades ranked by category wins gained, with plain-text explanations; **Create a
+  Trade** to search by one player you want or run **Offer Builder** from your own
+  trade block (any deal up to 3-for-3, ranked Win-win/Close call/Max gain, with a
+  pitch for the other manager); and a mock-trade simulator with your own adds/drops,
+  a pickup suggestion, and health and games-played history for every player in the deal
 - **Player Rankings** — every player, rostered or free agent, ranked in each category
   and overall, shaded like the team rankings, with team, position and health filters
 

@@ -339,7 +339,7 @@ all-play win rate per category; empty until week 1 finishes). The highlighted te
 (the signed-in manager's team by default) is outlined and shows its tiers; a category detail chart shows
 the gaps that ranks hide.
 
-**Trade & Waiver Analyzer** (the Trade Analyzer page), four tabs:
+**Trade & Waiver Analyzer** (the Trade Analyzer page), five tabs:
 
 - *Team profile:* rank, team z, gaps, weight and tier per category, plus the team's
   E and all-play matchup record.
@@ -348,8 +348,16 @@ the gaps that ranks hide.
   win-win deals (my E up, theirs not down), with a Lopsided flag (general value
   given vs received differs by more than 1.5 z, hidden by default), top targets and
   trade chips.
+- *Create a Trade:* two ways to start a deal -- search by one player you want
+  (every 1-for-1/2-for-1/1-for-2/2-for-2 that brings him over, sorted by how likely
+  the other manager is to accept), or **Offer Builder** *(added later)*: pick your
+  own trade block (up to 6 players) and a target team or "Any team," and every deal
+  up to 3-for-3 built from it comes back ranked Win-win / Close call / Max gain,
+  each with a pitch written from the partner's side of the numbers.
 - *Mock trade:* the simulator above, now with ranks, tiers, E and record before and
-  after for both teams; any recommendation loads into it with matching numbers.
+  after for both teams, your own adds/drops around the trade, a step-by-step E
+  breakdown and a free-agent pickup suggestion; any recommendation loads into it
+  with matching numbers.
 
 Key definitions: a category's **weight** for a team is how many opponents a change
 of delta (default 1.0 z) would flip, `(U + 0.5 D) / (N - 1)`, scaled to average 1.

@@ -3,10 +3,13 @@ ranked by how much each raises its expected all-play category wins (E), and keep
 the mock-trade simulator from the original proposal.
 
 Controls: team (default team 10), stat window, swing size delta, per-category tier
-overrides. Four tabs: Team profile, Waiver wire, Trade finder, Mock trade. Any
-waiver or trade row loads into Mock trade, which runs the same simulation, so its
-numbers match the row's. The math lives in app/analysis (tested); this page only
-lays it out. Reads v_player_z (z-scores) and v_player_pool (per-game lines).
+overrides. Five tabs: Team profile, Waiver wire, Trade finder, Create a Trade, Mock
+trade. Any waiver or trade row loads into Mock trade, which runs the same
+simulation, so its numbers match the row's. Create a Trade has two ways in: search
+by one player you want, or Offer Builder -- pick the players you'd move and it
+proposes the best deals for them. The math lives in app/analysis (tested); this
+page only lays it out. Reads v_player_z (z-scores) and v_player_pool (per-game
+lines).
 """
 
 import pandas as pd
@@ -16,12 +19,15 @@ import analyzer
 import login
 import queries
 import ui
-from analysis.explain import explain
+from analysis.explain import explain, pitch_text
 from analysis.objective import expected_category_wins, matchup_record
 from analysis.trades import (
+    CLOSE_CALL,
     COSTS_YOU,
     LIKELY,
+    MAX_GAIN,
     THEY_SAY_NO,
+    WIN_WIN,
     as_ids,
     present,
     simulate_trade,
@@ -101,19 +107,30 @@ def cat_deltas(row, prefix="dE_") -> dict:
     return {col: row[f"{prefix}{col}"] for col in COLUMNS}
 
 
+def keep_valid(key: str, options: list, multi: bool) -> None:
+    """Drop a stored selection that no longer fits the options (e.g. after the
+    partner changed), before the widget renders."""
+    value = st.session_state.get(key)
+    if value is None:
+        return
+    if multi:
+        value = value if isinstance(value, list) else [value]
+        st.session_state[key] = [v for v in value if v in options]
+    elif value not in options:
+        st.session_state[key] = None
+
+
 def load_into_mock(partner, give, get, my_drop=None, their_drop=None, my_add=None, their_add=None):
-    """Button callback: fill the Mock trade tab's controls with one deal."""
-
-    def one(x):
-        return int(x) if present(x) else None
-
+    """Button callback: fill the Mock trade tab's controls with one deal. The
+    partner's drop/add can be one player (most deals) or several (an uneven Offer
+    Builder deal, e.g. a 3-for-1 where the partner must drop two to balance)."""
     st.session_state["mock-partner"] = int(partner)
     st.session_state["mock-give"] = [int(x) for x in give]
     st.session_state["mock-get"] = [int(x) for x in get]
     st.session_state["mock-my-drop"] = [int(x) for x in as_ids(my_drop)]
-    st.session_state["mock-their-drop"] = one(their_drop)
+    st.session_state["mock-their-drop"] = [int(x) for x in as_ids(their_drop)]
     st.session_state["mock-my-add"] = [int(x) for x in as_ids(my_add)]
-    st.session_state["mock-their-add"] = one(their_add)
+    st.session_state["mock-their-add"] = [int(x) for x in as_ids(their_add)]
     st.toast("Loaded. Open the Mock trade tab to see it.")
 
 
@@ -303,16 +320,17 @@ with finder_tab:
 
 
 def roster_moves(deal) -> str:
-    """The add/drop moves that keep both rosters full, as a sentence (or "")."""
+    """The add/drop moves that keep both rosters full, as a sentence (or "").
+    Each field is one player id, None, or (Offer Builder, an uneven deal) several."""
     extra = []
-    if present(deal["my_drop_id"]):
-        extra.append(f"you drop {player_name[deal['my_drop_id']]}")
-    if present(deal["my_add_id"]):
-        extra.append(f"you pick up {player_name[deal['my_add_id']]} (free agent)")
-    if present(deal["their_drop_id"]):
-        extra.append(f"they drop {player_name[deal['their_drop_id']]}")
-    if present(deal["their_add_id"]):
-        extra.append(f"they pick up {player_name[deal['their_add_id']]} (free agent)")
+    if as_ids(deal["my_drop_id"]):
+        extra.append(f"you drop {names_of(as_ids(deal['my_drop_id']))}")
+    if as_ids(deal["my_add_id"]):
+        extra.append(f"you pick up {names_of(as_ids(deal['my_add_id']))} (free agent)")
+    if as_ids(deal["their_drop_id"]):
+        extra.append(f"they drop {names_of(as_ids(deal['their_drop_id']))}")
+    if as_ids(deal["their_add_id"]):
+        extra.append(f"they pick up {names_of(as_ids(deal['their_add_id']))} (free agent)")
     return ("To keep rosters full: " + "; ".join(extra) + ".") if extra else ""
 
 
@@ -359,6 +377,222 @@ def deal_card(deal, key: str) -> None:
 
 
 with create_tab:
+    st.subheader("Offer Builder")
+    st.caption(
+        "Pick the players you're willing to move and (optionally) who with. Every "
+        "deal built from them that raises your expected category wins comes back, "
+        "ranked by how likely the other manager is to take it."
+    )
+
+    ANY_TEAM = 0  # sentinel: team ids here are always > 0
+
+    def block_label(pid) -> str:
+        row = players.loc[pid]
+        note = ""
+        positive_by_tier: dict[str, float] = {}
+        for col in COLUMNS:
+            if row[col] > 0:
+                tier = w_me.at[col, "tier"]
+                positive_by_tier[tier] = positive_by_tier.get(tier, 0.0) + row[col]
+        if positive_by_tier:
+            top_tier = max(positive_by_tier, key=positive_by_tier.get)
+            if top_tier == "Punt":
+                note = " (value mostly in your Punt categories)"
+            elif top_tier == "Lock":
+                note = " (value mostly in your Lock categories)"
+        return f"{row['player_name']}{note}"
+
+    block_options = [int(i) for i in players.index[(players["team_id"] == me) & ~players["is_ir"]]]
+    block = st.multiselect(
+        "Trade block",
+        block_options,
+        format_func=block_label,
+        max_selections=6,
+        key="offer-block",
+        help="Players you're willing to trade away, up to 6. A note flags one whose "
+        "value sits mostly in a category you've locked up or punted -- often the "
+        "easiest to deal, since it costs you the least.",
+    )
+
+    b1, b2, b3 = st.columns(3)
+    target_choice = b1.selectbox(
+        "Target team",
+        [ANY_TEAM, *team_ids],
+        format_func=lambda t: "Any team" if t == ANY_TEAM else team_label(t),
+        key="offer-target",
+    )
+    max_give_opts = [n for n in (1, 2, 3) if n <= len(block)] or [1, 2, 3]
+    keep_valid("offer-max-give", max_give_opts, multi=False)
+    if st.session_state.get("offer-max-give") is None:
+        st.session_state["offer-max-give"] = max_give_opts[min(1, len(max_give_opts) - 1)]
+    max_give = b2.selectbox(
+        "Max players you give",
+        max_give_opts,
+        key="offer-max-give",
+        help="Capped by how many players are in your trade block.",
+    )
+    max_get = b3.selectbox("Max players you get", [1, 2, 3], index=1, key="offer-max-get")
+
+    acceptance_label = st.radio(
+        "Acceptance level",
+        ["Win-win", "Close call", "Max gain"],
+        horizontal=True,
+        key="offer-acceptance",
+        help="Win-win: they don't lose either. Close call: costs them a little, but "
+        "looks fair by value. Max gain: the ceiling, lopsided deals included -- "
+        "expect most to be turned down.",
+    )
+    acceptance = {"Win-win": WIN_WIN, "Close call": CLOSE_CALL, "Max gain": MAX_GAIN}[
+        acceptance_label
+    ]
+    with st.expander("Advanced"):
+        exclude_injured = st.checkbox(
+            "Exclude injured players I'd receive",
+            value=True,
+            key="offer-exclude-injured",
+            help="Drops players listed OUT or on IR from the other side.",
+        )
+        allow_uneven = st.checkbox(
+            "Allow uneven deals",
+            value=True,
+            key="offer-allow-uneven",
+            help="Off: only sizes like 1-for-1 or 2-for-2, where you give and get "
+            "the same number of players.",
+        )
+
+    if st.button("Find offers", type="primary", key="offer-find"):
+        if not block:
+            st.error("Pick at least one player you'd trade.")
+        else:
+            targets = (
+                tuple(t for t in team_ids if t != me)
+                if target_choice == ANY_TEAM
+                else (int(target_choice),)
+            )
+            st.session_state["offer-params"] = (
+                tuple(sorted(int(b) for b in block)),
+                targets,
+                int(max_give),
+                int(max_get),
+                acceptance,
+                bool(exclude_injured),
+                bool(allow_uneven),
+            )
+            st.session_state.pop("offer-show-targets", None)
+
+    offer_params = st.session_state.get("offer-params")
+    if offer_params is None:
+        st.info("Pick at least one player you'd trade, then press **Find offers**.")
+    else:
+        pblock, ptargets, pmax_give, pmax_get, pacceptance, pexclude, puneven = offer_params
+        deals, problem = analyzer.offers(
+            window, me, pblock, ptargets, delta, overrides, pmax_give, pmax_get,
+            pacceptance, pexclude, puneven,
+        )  # fmt: skip
+        if problem:
+            st.error(problem)
+        elif deals is None or deals.empty:
+            st.info(
+                "No deal with these players raises your category wins at this acceptance level."
+            )
+            e1, e2 = st.columns(2)
+            next_level = {WIN_WIN: ("Close call", CLOSE_CALL), CLOSE_CALL: ("Max gain", MAX_GAIN)}
+            if pacceptance in next_level:
+                next_label, next_value = next_level[pacceptance]
+                if e1.button(f"Try {next_label}", key="offer-try-next"):
+                    st.session_state["offer-params"] = (
+                        pblock, ptargets, pmax_give, pmax_get, next_value, pexclude, puneven,
+                    )  # fmt: skip
+                    st.rerun()
+            if e2.button("Show top targets", key="offer-show-targets-btn"):
+                st.session_state["offer-show-targets"] = True
+            if st.session_state.get("offer-show-targets"):
+                st.caption("Players on other rosters worth the most to you.")
+                targets_df = top_targets(players, me, w_me)
+                st.dataframe(
+                    targets_df.assign(team=targets_df["team_id"].map(lambda t: team_label(int(t))))[
+                        ["player_name", "team", "value", "generic"]
+                    ],
+                    column_config={
+                        "player_name": "Player",
+                        "team": "Team",
+                        "value": st.column_config.NumberColumn("Value to you", format="%+.2f"),
+                        "generic": st.column_config.NumberColumn("General value", format="%+.2f"),
+                    },
+                    hide_index=True,
+                    width="stretch",
+                )
+        else:
+
+            def cat_changes_text(row) -> str:
+                vals = [(LABELS[c], row[f"dE_{c}"]) for c in COLUMNS]
+                gains = sorted((v for v in vals if v[1] > 0), key=lambda v: -v[1])[:2]
+                losses = sorted((v for v in vals if v[1] < 0), key=lambda v: v[1])[:1]
+                left = ", ".join(f"+{label}" for label, _ in gains)
+                right = ", ".join(f"{n:+g} {label}" for label, n in losses)
+                return " / ".join(p for p in (left, right) if p) or "No category change"
+
+            table = pd.DataFrame(
+                {
+                    "Team": [team_label(int(r.partner_id)) for r in deals.itertuples()],
+                    "You give": [names_of(r.give_ids) for r in deals.itertuples()],
+                    "You get": [names_of(r.get_ids) for r in deals.itertuples()],
+                    "ΔE you": [r.dE_me for r in deals.itertuples()],
+                    "ΔE them": [r.dE_them for r in deals.itertuples()],
+                    "Your category changes": [cat_changes_text(row) for _, row in deals.iterrows()],
+                    "Roster moves": [roster_moves(row) or "—" for _, row in deals.iterrows()],
+                    "Flag": [
+                        "Lopsided" if r.lopsided and pacceptance == MAX_GAIN else ""
+                        for r in deals.itertuples()
+                    ],
+                }
+            )
+            st.caption(f"{len(deals)} offer{'s' if len(deals) != 1 else ''} found.")
+            st.dataframe(
+                table,
+                column_config={
+                    "ΔE you": st.column_config.NumberColumn(format="%+g"),
+                    "ΔE them": st.column_config.NumberColumn(format="%+g"),
+                },
+                hide_index=True,
+                width="stretch",
+                height=ui.table_height(len(table)),
+            )
+            for k, deal in deals.iterrows():
+                title = (
+                    f"{team_label(deal['partner_id'])}: give {names_of(deal['give_ids'])} for "
+                    f"{names_of(deal['get_ids'])} · you {deal['dE_me']:+g}, them "
+                    f"{deal['dE_them']:+g}"
+                )
+                with st.expander(title):
+                    st.markdown("**Why it helps you**")
+                    st.write(explain(cat_deltas(deal)))
+                    st.markdown("**The pitch** (to send the other manager)")
+                    st.write(pitch_text(cat_deltas(deal, prefix="dEt_")))
+                    moves = roster_moves(deal)
+                    if moves:
+                        st.caption(moves)
+                    st.caption(
+                        f"General value (total z): you give {deal['gen_give']:+.2f}, "
+                        f"you get {deal['gen_get']:+.2f}."
+                    )
+                    st.button(
+                        "Load into mock trade",
+                        key=f"offer-load-{k}",
+                        on_click=load_into_mock,
+                        args=(
+                            deal["partner_id"],
+                            deal["give_ids"],
+                            deal["get_ids"],
+                            deal["my_drop_id"],
+                            deal["their_drop_id"],
+                            deal["my_add_id"],
+                            deal["their_add_id"],
+                        ),
+                    )
+
+    st.divider()
+    st.subheader("Search by player")
     st.caption(
         "Pick a player you want. Every 1-for-1, 2-for-1, 1-for-2 and 2-for-2 deal that "
         "brings him to you is scored for both teams, and the ones the other manager is "
@@ -445,19 +679,6 @@ with create_tab:
 # --- Mock trade --------------------------------------------------------------------
 
 
-def keep_valid(key: str, options: list, multi: bool) -> None:
-    """Drop a stored selection that no longer fits the options (e.g. after the
-    partner changed), before the widget renders."""
-    value = st.session_state.get(key)
-    if value is None:
-        return
-    if multi:
-        value = value if isinstance(value, list) else [value]
-        st.session_state[key] = [v for v in value if v in options]
-    elif value not in options:
-        st.session_state[key] = None
-
-
 def per_game_lines(window: str) -> pd.DataFrame:
     """Raw per-game lines for the per-game table. Blended has no raw line of its own,
     so it uses each player's season stats once he has them, else his projection."""
@@ -515,18 +736,18 @@ with mock_tab:
     my_add = m1.multiselect("Add free agents", my_add_opts, format_func=label, key="mock-my-add")
     my_drop = m2.multiselect("Drop players", my_drop_opts, format_func=label, key="mock-my-drop")
 
-    their_drop = their_add = None
+    their_drop = their_add = []
     if not is_waiver:
         with st.expander(f"{team_label(partner)}'s roster moves (optional)"):
             r1, r2 = st.columns(2)
-            their_drop_opts = [None, *[i for i in their_ids if i not in get]]
-            their_add_opts = [None, *[i for i in fa_ids if i not in my_add]]
-            keep_valid("mock-their-drop", their_drop_opts, multi=False)
-            keep_valid("mock-their-add", their_add_opts, multi=False)
-            their_drop = r1.selectbox(
+            their_drop_opts = [i for i in their_ids if i not in get]
+            their_add_opts = [i for i in fa_ids if i not in my_add]
+            keep_valid("mock-their-drop", their_drop_opts, multi=True)
+            keep_valid("mock-their-add", their_add_opts, multi=True)
+            their_drop = r1.multiselect(
                 "They also drop", their_drop_opts, format_func=label, key="mock-their-drop"
             )
-            their_add = r2.selectbox(
+            their_add = r2.multiselect(
                 "They also pick up", their_add_opts, format_func=label, key="mock-their-add"
             )
 
@@ -653,8 +874,8 @@ with mock_tab:
     moves += [(pid, "You add" if is_waiver else "You get") for pid in get]
     moves += [(pid, "You also drop") for pid in my_drop]
     moves += [(pid, "You pick up") for pid in my_add]
-    moves += [(pid, "They drop") for pid in [their_drop] if pid]
-    moves += [(pid, "They pick up") for pid in [their_add] if pid]
+    moves += [(pid, "They drop") for pid in their_drop]
+    moves += [(pid, "They pick up") for pid in their_add]
     profile = queries.player_profile().set_index("player_id")
     deal_lines = per_game_lines(window).set_index("player_id")
     STATUS = {"ACTIVE": "Healthy", "DAY_TO_DAY": "Day-to-day", "OUT": "Out"}
@@ -813,6 +1034,6 @@ with mock_tab:
             per_game(me, mine_out, mine_in)
         if not is_waiver:
             with p2:
-                theirs_out = [*get, *([their_drop] if their_drop else [])]
-                theirs_in = [*give, *([their_add] if their_add else [])]
+                theirs_out = [*get, *their_drop]
+                theirs_in = [*give, *their_add]
                 per_game(partner, theirs_out, theirs_in)
