@@ -33,6 +33,8 @@ better; FG%, FT%, 3PT% and A/TO are ratios), Most Categories or Each Category.
 | [docs/multiLeagueDocs/killswitch.md](docs/multiLeagueDocs/killswitch.md) | Budget kill switch runbook |
 | [docs/multiLeagueDocs/phase1.md](docs/multiLeagueDocs/phase1.md) | Phase 1: tenancy, generic scoring, ingest fan-out, sign-in, ops, load test, cost, what's left |
 | [docs/multiLeagueDocs/phase2.md](docs/multiLeagueDocs/phase2.md) | Phase 2: private leagues, write-only saved logins, expiry |
+| [docs/multiLeagueDocs/trade-analyzer.md](docs/multiLeagueDocs/trade-analyzer.md) | Trade Analyzer: every tab, Create a trade, Mock trade moves and pickups |
+| [docs/multiLeagueDocs/metrics.md](docs/multiLeagueDocs/metrics.md) | z-scores and every metric built on them, for any league's categories |
 | [docs/initialSingleLeagueBuildDocs/](docs/initialSingleLeagueBuildDocs/) | The original single-league build |
 
 ## Architecture
