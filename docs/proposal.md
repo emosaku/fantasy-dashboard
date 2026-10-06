@@ -252,7 +252,7 @@ Key implementation details:
 
 | Page | Controls | Visuals |
 |---|---|---|
-| Compare | Pick two teams, week or season | Radar chart of category z-scores; side-by-side bars per category |
+| Compare | Pick two teams, week or season (Players mode *(added)*: 2-4 players, any stat window) | Radar chart of category z-scores; side-by-side bars per category |
 | Power Rankings | Week slider | Ranked table with all-play record; rank-over-time line chart |
 | Matchups and Luck | Week picker | Category scoreboard per matchup; luck bar chart (actual vs all-play win %) |
 | Transactions | Team filter, action filter | Activity log table; adds and drops per team bar chart |
@@ -374,6 +374,49 @@ sign flip; it has 14 teams, not 12. One rule added beyond the original spec: in 
 2-for-1, the side left a player short picks up the best available free agent for
 the open spot, so both rosters stay full and 2-for-1s aren't a free upgrade for
 whoever receives two players. The math lives in a tested package, `app/analysis/`.
+
+### Feature design: Player Compare *(added after the original proposal)*
+
+A **Teams | Players** toggle on the Compare page. Teams mode is the original page
+above, unchanged. Players mode compares 2-4 players (rostered or free agent) on the
+same z-score foundation as Player Rankings and the Trade Analyzer, so a player's
+rank and value always match what those pages show.
+
+- **Picker:** searchable multi-select (every pool player, labelled with position,
+  team or FA, and a health badge), filter chips (My team / Other teams / Free
+  agents), a stat window selector. Player Rankings ("Compare selected", after
+  selecting 2-4 table rows) and every Trade Analyzer recommendation row ("Compare
+  players") can open this page pre-loaded, via `st.session_state["compare-players"]`
+  (clipped to 4 — an uneven Offer Builder deal can touch up to 6 players).
+- **Category radar**, clipped to ±3 SD so one outlier doesn't flatten it (true value
+  on hover); grouped horizontal bars instead on a narrow screen (a `Sec-Ch-Ua-Mobile`
+  client hint picks the default; a toggle overrides it either way).
+- **Stat table:** one row per category, one column per player — per-game value,
+  league rank, makes/attempts beside a percentage (e.g. "48.2% on 15.1 FGA" — volume
+  is what moves a team's percentage); the best value in each row is bold; footer
+  rows for overall rank, total z and games played.
+- **Fit for your team:** each player's value to the signed-in manager's team
+  (`v = Σ weight × z`, the same number the Trade Analyzer shows) next to his generic
+  total z, and the tier breakdown in words ("70% of his value is in your Swing
+  categories") — two players who rank similarly overall can look very different here.
+- **Recent form:** total z across Last 7/15/30 and Season as a small line chart, so
+  trending up or down shows without a separate page.
+- **Health and durability:** the same component (and the same `queries.player_profile()`
+  read) the Mock trade's "Players in this deal" table already uses, factored out to
+  `app/health.py` so both share it.
+- With exactly 2 players, a one-line verdict ("Player A wins 6 of 9 categories;
+  Player B is better in FT%, 3PT% and STL"), counted by z (not the raw percentage,
+  so volume is judged the same way as everywhere else on the page).
+
+A fourth categorical color (`ui.py`'s `series` palette only defines 3) was added for
+the 4-player case, paired with a distinct line/marker style per player so identity
+never rests on color alone. Every Teams-mode widget needed converting from
+`index=`/`default=` to a session-state-first pattern: Streamlit clears a
+selectbox/segmented_control/pills widget's state for any run where its branch
+doesn't execute (confirmed empirically; `st.multiselect` isn't affected), which a
+plain Teams ↔ Players toggle hits on every switch. The math lives in `compare.py`
+(`player_compare_frame`, `head_to_head_verdict`) and `app/analysis/weights.py`
+(`player_fit`), both tested on a synthetic pool.
 
 ### Later additions *(added after the original proposal)*
 

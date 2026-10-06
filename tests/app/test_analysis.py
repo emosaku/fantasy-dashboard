@@ -27,7 +27,7 @@ from analysis.trades import (
     simulate_trade,
 )
 from analysis.waivers import rank_pickups, rank_waiver_moves
-from analysis.weights import compute_weights, punts
+from analysis.weights import compute_weights, player_fit, player_values, punts
 from categories import COLUMNS
 from tests.fixtures.four_team_league import build_players
 
@@ -503,3 +503,30 @@ def test_ir_and_out_players_are_never_offered(players, totals, weights):
     all_ids = {i for row in offers.itertuples() for i in (*row.give_ids, *row.get_ids)}
     assert 41 not in all_ids
     assert 102 not in all_ids  # OUT free agent, excluded from any add
+
+
+# --- Compare page: player_fit --------------------------------------------------------
+
+
+def test_player_fit_matches_the_trade_analyzers_own_value(players, totals, weights):
+    w = weights[3]
+    ids = [30, 31]
+    fit = player_fit(players, ids, w)
+    expected = player_values(players.loc[ids], w)
+    assert fit.loc[30, "value"] == pytest.approx(expected[30])
+    assert fit.loc[31, "value"] == pytest.approx(expected[31])
+
+
+def test_player_fit_breakdown_sums_to_a_hundred_percent(players, totals, weights):
+    fit = player_fit(players, [30, 31, 32], weights[3])
+    for pid, row in fit.iterrows():
+        if row["tier_breakdown"] and "no positive value" not in row["tier_breakdown"]:
+            pcts = [int(part.split("%")[0]) for part in row["tier_breakdown"].split("; ")]
+            assert sum(pcts) in (99, 100, 101)  # rounding
+
+
+def test_player_fit_handles_a_player_not_in_the_pool(players, totals, weights):
+    fit = player_fit(players, [30, 999999], weights[3])
+    assert pd.isna(fit.loc[999999, "value"])
+    assert fit.loc[999999, "tier_breakdown"] == ""
+    assert not pd.isna(fit.loc[30, "value"])

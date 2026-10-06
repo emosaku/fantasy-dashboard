@@ -5,6 +5,11 @@ Colors are the validated default data-viz palette. Categorical slots are used in
 fixed order and capped at 3 per chart (the first three are the ones that stay
 colorblind-distinguishable all-pairs). Diverging scales are red <-> blue with a gray
 midpoint. Each mode has its own steps, picked from Streamlit's active theme.
+
+Player Compare needs a 4th categorical slot (2-4 players, one color each): `series`
+stays capped at 3 for every other chart; `series4` is that plus one more step
+(a violet, furthest in hue from the other three), used only there, and paired with
+a distinct marker/line style per player so identity never rests on color alone.
 """
 
 from zoneinfo import ZoneInfo
@@ -17,6 +22,7 @@ import refresh
 
 LIGHT = {
     "series": ["#2a78d6", "#eb6834", "#1baf7a"],
+    "series4": ["#2a78d6", "#eb6834", "#1baf7a", "#8e5ac8"],
     "negative": "#e34948",
     "positive": "#2a78d6",
     "midpoint": "#f0efec",
@@ -27,6 +33,7 @@ LIGHT = {
 }
 DARK = {
     "series": ["#3987e5", "#d95926", "#199e70"],
+    "series4": ["#3987e5", "#d95926", "#199e70", "#a878e0"],
     "negative": "#e66767",
     "positive": "#3987e5",
     "midpoint": "#383835",

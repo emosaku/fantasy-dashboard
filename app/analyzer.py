@@ -12,6 +12,7 @@ import queries
 from analysis.pool import empty_slot_z, player_matrix, team_totals
 from analysis.trades import SearchTooLarge, build_offers, deals_for_target, find_trades
 from analysis.weights import compute_weights
+from analysis.weights import player_fit as _player_fit
 
 STAT_WINDOWS = {
     "blended": "Blended",
@@ -106,3 +107,14 @@ def offers(
         return deals, None
     except SearchTooLarge as error:
         return None, str(error)
+
+
+@st.cache_data(ttl=3600, max_entries=200, show_spinner=False)
+def player_fit(
+    window: str, team_id: int, player_ids: tuple, delta: float, overrides: tuple
+) -> pd.DataFrame:
+    """Compare page's Players mode: each player's fit for `team_id`, for the same
+    window/delta/overrides the Trade Analyzer uses -- see analysis.weights.player_fit."""
+    players, totals = league(window)
+    weights = compute_weights(totals, team_id, delta, dict(overrides))
+    return _player_fit(players, list(player_ids), weights)

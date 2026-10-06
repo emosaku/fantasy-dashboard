@@ -54,7 +54,7 @@ BigQuery views (Step 5)
 | Page | Controls | Visuals | Reads |
 |---|---|---|---|
 | **Home** | — | standings with managers' real names; links to every page | `teams` |
-| **Compare** | two teams (yours by default); season or one week | one-line verdict ("would beat X, winning 6…"); radar of category z-scores with a league-average ring; 3×3 small multiples of the raw values; table view | `v_team_week_cats` |
+| **Compare** | Teams/Players toggle *(added)*. Teams: two teams (yours by default), season or one week. Players: 2-4 players (rostered or free agent), stat window, filter chips | Teams: one-line verdict ("would beat X, winning 6…"); radar of category z-scores with a league-average ring; 3×3 small multiples of the raw values; table view. Players *(added)*: category radar (bars on a phone), ranked stat table, fit for your team, recent-form line chart, health/durability; a 2-player verdict | `v_team_week_cats`; Players: `v_player_z`, `v_player_pool`, `v_player_profile` |
 | **Power Rankings** | week slider (once there are 2+ weeks); injury assumptions | ranked table with all-play record, win %, category win %, rank movement (ties share a rank); projected finish through the end of the regular season, leaving injured players out of the weeks they're expected to miss, with a who's-missing list; rank-over-time chart with up to 3 highlighted teams | `v_power_rankings`, `v_all_play`, `v_player_pool`, `league_status` |
 | **Matchups and Luck** | week picker | one scoreboard card per matchup (winner named, higher value bold); season-to-date luck bar chart; luck table | `v_luck`, `v_team_week_cats` |
 | **Transactions** | dates, teams, actions, players (one filter bar for the chart and the log) | stacked activity per team with counts (adds, drops, trades, lineup moves); activity log of every matching row, lineup moves with their slots | `v_transactions` |
@@ -87,6 +87,19 @@ BigQuery views (Step 5)
   column; the log is sized to show every matching row.
 - **Roster Strength's rankings use the app's blue-to-red scale** (rank 1 blue, last
   red), not green-to-red, to match every other chart and stay colorblind-safe.
+- **Player Compare *(added)* reuses the Player Rankings/Trade Analyzer z-score
+  foundation**, so a player's rank and value always match what those pages show, and
+  the health table reuses the Mock trade's own component (`app/health.py`). Player
+  Rankings ("Compare selected") and every Trade Analyzer recommendation ("Compare
+  players") can open it pre-loaded via `st.session_state["compare-players"]`.
+- **A fourth player needed a fourth categorical color** (`ui.py`'s validated
+  palette only defines 3); it's paired with a distinct line/marker style per player
+  so identity never depends on color alone.
+- **Toggling Teams/Players needed a state-persistence fix.** Streamlit clears a
+  selectbox/segmented_control/pills widget's session_state for any run where its
+  branch doesn't execute — true every time the OTHER mode is active — so each
+  Compare control saves its live value to a plain backup key every run and restores
+  from it before the widget renders (`sticky_default`/`sticky_save`).
 
 ## Trade Analyzer
 

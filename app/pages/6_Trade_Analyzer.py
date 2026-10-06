@@ -38,6 +38,7 @@ from analysis.waivers import rank_pickups, rank_waiver_moves
 from analysis.weights import compute_weights, player_values, punts
 from categories import COLUMNS, LABELS, fmt
 from categories import totals as totals_of
+from health import games_by_season_text, health_text
 from trade import trade_impact
 
 st.title("Trade Analyzer")
@@ -134,6 +135,14 @@ def load_into_mock(partner, give, get, my_drop=None, their_drop=None, my_add=Non
     st.toast("Loaded. Open the Mock trade tab to see it.")
 
 
+def compare_players(ids) -> None:
+    """Button callback: open Compare in Players mode with these players. Compare
+    takes at most 4; an uneven Offer Builder deal can involve up to 6, so clip to
+    the first 4 (give side first -- the players this manager is giving up)."""
+    st.session_state["compare-players"] = [int(i) for i in ids][:4]
+    st.switch_page("pages/1_Compare.py")
+
+
 profile_tab, waiver_tab, finder_tab, create_tab, mock_tab = st.tabs(
     ["Team profile", "Waiver wire", "Trade finder", "Create a trade", "Mock trade"]
 )
@@ -206,11 +215,18 @@ with waiver_tab:
                 f"{LABELS[down]} {dz[down]:+.2f} z · value to you Δv {move['dv']:+.2f} · "
                 f"{move['add_name']} is {str(move['injury_status']).replace('_', ' ').lower()}"
             )
-            st.button(
+            wb1, wb2 = st.columns(2)
+            wb1.button(
                 "Load into mock trade",
                 key=f"waiver-load-{k}",
                 on_click=load_into_mock,
                 args=(0, [move["drop_id"]], [move["add_id"]]),
+            )
+            wb2.button(
+                "Compare players",
+                key=f"waiver-compare-{k}",
+                on_click=compare_players,
+                args=([move["drop_id"], move["add_id"]],),
             )
 
 # --- Trade finder ------------------------------------------------------------------
@@ -268,7 +284,8 @@ with finder_tab:
                     f"General value (total z): you give {deal['gen_give']:+.2f}, "
                     f"you get {deal['gen_get']:+.2f}."
                 )
-                st.button(
+                tb1, tb2 = st.columns(2)
+                tb1.button(
                     "Load into mock trade",
                     key=f"trade-load-{k}",
                     on_click=load_into_mock,
@@ -281,6 +298,12 @@ with finder_tab:
                         deal["my_add_id"],
                         deal["their_add_id"],
                     ),
+                )
+                tb2.button(
+                    "Compare players",
+                    key=f"trade-compare-{k}",
+                    on_click=compare_players,
+                    args=([*deal["give_ids"], *deal["get_ids"]],),
                 )
 
     t1, t2 = st.columns(2)
@@ -360,7 +383,8 @@ def deal_card(deal, key: str) -> None:
         moves = roster_moves(deal)
         if moves:
             st.caption(moves)
-        st.button(
+        db1, db2 = st.columns(2)
+        db1.button(
             "Load into mock trade",
             key=key,
             on_click=load_into_mock,
@@ -373,6 +397,12 @@ def deal_card(deal, key: str) -> None:
                 deal["my_add_id"],
                 deal["their_add_id"],
             ),
+        )
+        db2.button(
+            "Compare players",
+            key=f"{key}-compare",
+            on_click=compare_players,
+            args=([*deal["give_ids"], *deal["get_ids"]],),
         )
 
 
@@ -576,7 +606,8 @@ with create_tab:
                         f"General value (total z): you give {deal['gen_give']:+.2f}, "
                         f"you get {deal['gen_get']:+.2f}."
                     )
-                    st.button(
+                    ob1, ob2 = st.columns(2)
+                    ob1.button(
                         "Load into mock trade",
                         key=f"offer-load-{k}",
                         on_click=load_into_mock,
@@ -589,6 +620,12 @@ with create_tab:
                             deal["my_add_id"],
                             deal["their_add_id"],
                         ),
+                    )
+                    ob2.button(
+                        "Compare players",
+                        key=f"offer-compare-{k}",
+                        on_click=compare_players,
+                        args=([*deal["give_ids"], *deal["get_ids"]],),
                     )
 
     st.divider()
@@ -878,24 +915,12 @@ with mock_tab:
     moves += [(pid, "They pick up") for pid in their_add]
     profile = queries.player_profile().set_index("player_id")
     deal_lines = per_game_lines(window).set_index("player_id")
-    STATUS = {"ACTIVE": "Healthy", "DAY_TO_DAY": "Day-to-day", "OUT": "Out"}
 
     def health(pid) -> str:
-        if pid not in profile.index:
-            return ""
-        row = profile.loc[pid]
-        status = row["injury_status"] or "ACTIVE"
-        text = STATUS.get(status, str(status).replace("_", " ").title())
-        if pd.notna(row["expected_return_date"]):
-            text += f", back about {row['expected_return_date']:%b %-d}"
-        return text
+        return health_text(profile.loc[pid]) if pid in profile.index else ""
 
     def games_by_season(pid) -> str:
-        if pid not in profile.index:
-            return ""
-        row = profile.loc[pid]
-        seasons = [row["gp_3_seasons_ago"], row["gp_2_seasons_ago"], row["gp_last_season"]]
-        return " · ".join("–" if pd.isna(g) else f"{g:.0f}" for g in seasons)
+        return games_by_season_text(profile.loc[pid]) if pid in profile.index else ""
 
     deal_rows = []
     for pid, move in moves:
