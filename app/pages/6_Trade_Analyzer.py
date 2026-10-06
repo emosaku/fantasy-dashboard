@@ -18,9 +18,18 @@ import queries
 import ui
 from analysis.explain import explain
 from analysis.objective import expected_category_wins, matchup_record
-from analysis.trades import as_ids, present, simulate_trade, top_targets, trade_chips
+from analysis.trades import (
+    COSTS_YOU,
+    LIKELY,
+    THEY_SAY_NO,
+    as_ids,
+    present,
+    simulate_trade,
+    top_targets,
+    trade_chips,
+)
 from analysis.waivers import rank_pickups, rank_waiver_moves
-from analysis.weights import compute_weights, punts
+from analysis.weights import compute_weights, player_values, punts
 from categories import COLUMNS, LABELS, fmt
 from categories import totals as totals_of
 from trade import trade_impact
@@ -108,8 +117,8 @@ def load_into_mock(partner, give, get, my_drop=None, their_drop=None, my_add=Non
     st.toast("Loaded. Open the Mock trade tab to see it.")
 
 
-profile_tab, waiver_tab, finder_tab, mock_tab = st.tabs(
-    ["Team profile", "Waiver wire", "Trade finder", "Mock trade"]
+profile_tab, waiver_tab, finder_tab, create_tab, mock_tab = st.tabs(
+    ["Team profile", "Waiver wire", "Trade finder", "Create a trade", "Mock trade"]
 )
 
 # --- Team profile ------------------------------------------------------------------
@@ -289,6 +298,149 @@ with finder_tab:
             hide_index=True,
             width="stretch",
         )
+
+# --- Create a trade ----------------------------------------------------------------
+
+
+def roster_moves(deal) -> str:
+    """The add/drop moves that keep both rosters full, as a sentence (or "")."""
+    extra = []
+    if present(deal["my_drop_id"]):
+        extra.append(f"you drop {player_name[deal['my_drop_id']]}")
+    if present(deal["my_add_id"]):
+        extra.append(f"you pick up {player_name[deal['my_add_id']]} (free agent)")
+    if present(deal["their_drop_id"]):
+        extra.append(f"they drop {player_name[deal['their_drop_id']]}")
+    if present(deal["their_add_id"]):
+        extra.append(f"they pick up {player_name[deal['their_add_id']]} (free agent)")
+    return ("To keep rosters full: " + "; ".join(extra) + ".") if extra else ""
+
+
+VERDICT = {
+    LIKELY: ":green-badge[Likely to work]",
+    COSTS_YOU: ":orange-badge[Costs you]",
+    THEY_SAY_NO: ":red-badge[They'd likely say no]",
+}
+
+
+def deal_card(deal, key: str) -> None:
+    with st.container(border=True):
+        st.markdown(
+            f"{VERDICT[deal['status']]} Send **{names_of(deal['give_ids'])}** → get "
+            f"**{names_of(deal['get_ids'])}**"
+        )
+        gap = deal["gen_get"] - deal["gen_give"]
+        fairness = (
+            "even value"
+            if abs(gap) <= 0.5
+            else (f"you get {gap:.1f} more value" if gap > 0 else f"you give {-gap:.1f} more value")
+        )
+        st.markdown(
+            f"You **{deal['dE_me']:+g}** category wins · them **{deal['dE_them']:+g}** · {fairness}"
+        )
+        st.caption(explain(cat_deltas(deal)))
+        moves = roster_moves(deal)
+        if moves:
+            st.caption(moves)
+        st.button(
+            "Load into mock trade",
+            key=key,
+            on_click=load_into_mock,
+            args=(
+                deal["partner_id"],
+                deal["give_ids"],
+                deal["get_ids"],
+                deal["my_drop_id"],
+                deal["their_drop_id"],
+                deal["my_add_id"],
+                deal["their_add_id"],
+            ),
+        )
+
+
+with create_tab:
+    st.caption(
+        "Pick a player you want. Every 1-for-1, 2-for-1, 1-for-2 and 2-for-2 deal that "
+        "brings him to you is scored for both teams, and the ones the other manager is "
+        "most likely to accept come first."
+    )
+    others = players.loc[
+        players["team_id"].notna() & (players["team_id"] != me) & ~players["is_ir"]
+    ]
+    value_to_me = player_values(others, w_me).sort_values(ascending=False)
+
+    def target_label(pid) -> str:
+        row = players.loc[pid]
+        text = f"{row['player_name']} · {row['position']} · {team_label(int(row['team_id']))}"
+        if row["injury_status"] not in ("ACTIVE", None) and pd.notna(row["injury_status"]):
+            text += f" · {str(row['injury_status']).replace('_', ' ').lower()}"
+        return text
+
+    p1, p2 = st.columns([1.4, 1])
+    target = p1.selectbox(
+        "Player you want",
+        [int(i) for i in value_to_me.index],
+        index=None,
+        format_func=target_label,
+        placeholder="Type a player's name...",
+        filter_mode="contains",
+        help="Players on other rosters, most valuable to your team first. Free agents "
+        "are on the Waiver wire tab; players on IR aren't listed.",
+    )
+    all_sizes = ["1-for-1", "2-for-1", "1-for-2", "2-for-2"]
+    create_sizes = p2.multiselect(
+        "Deal sizes",
+        all_sizes,
+        default=all_sizes,
+        key="create-sizes",
+        help="1-for-2 and 2-for-2 bring back a second player from them as well.",
+    )
+    if target is None:
+        st.info("Pick a player to see trades for him.")
+    else:
+        deals = analyzer.target_trades(window, me, target, delta, overrides)
+        if not deals.empty:
+            size = (
+                deals["give_ids"].map(len).astype(str)
+                + "-for-"
+                + deals["get_ids"].map(len).astype(str)
+            )
+            deals = deals.loc[size.isin(create_sizes)]
+        likely = deals.loc[deals["status"] == LIKELY] if not deals.empty else deals
+        st.markdown(
+            f"**{player_name[target]}** is worth {value_to_me[target]:+.2f} to you "
+            f"(general value {players.loc[target, COLUMNS].sum():+.2f})."
+        )
+        if likely.empty:
+            st.warning(
+                "No deal both helps you and leaves the other team no worse off. The "
+                "closest options are below."
+            )
+        else:
+            st.subheader("Best offers")
+            for k, deal in likely.head(5).iterrows():
+                deal_card(deal, f"create-load-{k}")
+        if len(likely) < 3 and not deals.empty:
+            costs = deals.loc[deals["status"] == COSTS_YOU].head(2)
+            no = deals.loc[deals["status"] == THEY_SAY_NO].head(2)
+            if not costs.empty:
+                st.subheader("What it would take")
+                st.caption(
+                    "They'd likely accept these, but they don't help your categories: "
+                    "the price of getting him."
+                )
+                for k, deal in costs.iterrows():
+                    deal_card(deal, f"create-load-{k}")
+            if not no.empty:
+                st.subheader("Good for you, harder to sell")
+                st.caption(
+                    "These help you, but cost them category wins or look lopsided by "
+                    "player value, so expect pushback."
+                )
+                for k, deal in no.iterrows():
+                    deal_card(deal, f"create-load-{k}")
+        if deals.empty:
+            st.info("No deal for him helps either team.")
 
 # --- Mock trade --------------------------------------------------------------------
 

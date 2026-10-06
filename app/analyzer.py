@@ -10,7 +10,7 @@ import streamlit as st
 
 import queries
 from analysis.pool import empty_slot_z, player_matrix, team_totals
-from analysis.trades import find_trades
+from analysis.trades import deals_for_target, find_trades
 from analysis.weights import compute_weights
 
 STAT_WINDOWS = {
@@ -50,6 +50,15 @@ def weights_by_team(window: str, me: int, delta: float, overrides: tuple) -> dic
 def all_trades(window: str, me: int, delta: float, overrides: tuple) -> pd.DataFrame:
     players, totals = league(window)
     return find_trades(players, totals, me, weights_by_team(window, me, delta, overrides), top=5000)
+
+
+@st.cache_data(ttl=3600, max_entries=100, show_spinner="Building trades for this player...")
+def target_trades(
+    window: str, me: int, target: int, delta: float, overrides: tuple
+) -> pd.DataFrame:
+    players, totals = league(window)
+    weights = weights_by_team(window, me, delta, overrides)
+    return deals_for_target(players, totals, me, target, weights)
 
 
 def team_names() -> pd.Series:
