@@ -8,6 +8,7 @@ import pandas as pd
 
 from analysis.objective import category_wins
 from analysis.weights import player_values, punts
+from categories import COLUMNS
 
 
 def rank_waiver_moves(
@@ -46,7 +47,7 @@ def rank_pickups(
 
     row = totals.loc[me].to_numpy()
     others = totals.drop(me).to_numpy()
-    cols = list(totals.columns)
+    cols = COLUMNS
     zf = pool[cols].to_numpy()
     vf = player_values(pool, weights).to_numpy()
     if add_only:
@@ -62,8 +63,8 @@ def rank_pickups(
         vd = player_values(mine, weights).to_numpy()
 
     after = row + zf[:, None, :] - zd[None, :, :]  # free agent x drop x category
-    cat = category_wins(after.reshape(-1, len(cols)), others) - category_wins(row, others)
-    cat[:, np.isin(cols, punts(weights))] = 0.0
+    cat = category_wins(after.reshape(-1, len(COLUMNS)), others) - category_wins(row, others)
+    cat[:, np.isin(COLUMNS, punts(weights))] = 0.0
 
     f_idx, d_idx = np.divmod(np.arange(len(cat)), len(zd))
     moves = pd.DataFrame(
@@ -75,8 +76,8 @@ def rank_pickups(
             "drop_name": drop_names[d_idx],
             "dE": cat.sum(1),
             "dv": vf[f_idx] - vd[d_idx],
-            **{f"dE_{c}": cat[:, i] for i, c in enumerate(cols)},
-            **{f"dz_{c}": (zf[f_idx] - zd[d_idx])[:, i] for i, c in enumerate(cols)},
+            **{f"dE_{c}": cat[:, i] for i, c in enumerate(COLUMNS)},
+            **{f"dz_{c}": (zf[f_idx] - zd[d_idx])[:, i] for i, c in enumerate(COLUMNS)},
         }
     )
     return moves.sort_values(["dE", "dv"], ascending=False).head(top).reset_index(drop=True)
