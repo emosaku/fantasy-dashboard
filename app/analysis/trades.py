@@ -23,7 +23,6 @@ import pandas as pd
 from analysis.objective import category_wins, head_to_head
 from analysis.pool import contribution
 from analysis.weights import generic_values, player_values, punts
-from categories import COLUMNS
 
 LOPSIDED_GAP = 1.5  # generic value given vs received, in total z
 
@@ -40,7 +39,7 @@ def _side_delta(before: pd.DataFrame, after: pd.DataFrame, team_id: int, punted)
         row = totals.loc[team_id].to_numpy()
         return category_wins(row, totals.drop(team_id).to_numpy())
 
-    delta = pd.Series(wins(after) - wins(before), index=COLUMNS)
+    delta = pd.Series(wins(after) - wins(before), index=after.columns)
     delta[list(punted)] = 0.0
     return SideResult(team_id, delta, float(delta.sum()))
 
@@ -48,6 +47,13 @@ def _side_delta(before: pd.DataFrame, after: pd.DataFrame, team_id: int, punted)
 def present(player_id) -> bool:
     """A drop slot can hold None, or NaN once it has been through a DataFrame."""
     return player_id is not None and not pd.isna(player_id)
+
+
+def as_ids(players) -> list:
+    """A roster move as a list of player ids: None/NaN (nobody), one id, or several."""
+    if players is None or isinstance(players, (int, float, np.integer, np.floating)):
+        return [players] if present(players) else []
+    return [p for p in players if present(p)]
 
 
 def best_pickup(players: pd.DataFrame, weights: pd.DataFrame):
@@ -69,17 +75,22 @@ def apply_trade(
     their_drop=None,
     my_add=None,
     their_add=None,
+    empty=None,
 ) -> pd.DataFrame:
     """Team totals after a deal. them=None means the free-agent pool (a waiver move:
     `give` are drops, `get` are pickups); only my row changes then. *_drop / *_add
-    are the roster-size moves that go with the deal."""
+    are the add/drop moves that go with the deal: each one player id, None, or a list
+    of ids (my side can add and drop several free agents around a trade).
+    empty: the z of an empty roster spot (pool.empty_slot_z). Given, a side left with
+    fewer players than it started with is charged an empty spot for each one short --
+    otherwise an open spot counts as an average player."""
 
     def moved(ids_out, ids_in, drop, add):
-        delta = contribution(players, ids_in) - contribution(players, ids_out)
-        if present(drop):
-            delta = delta - contribution(players, [drop])
-        if present(add):
-            delta = delta + contribution(players, [add])
+        ins, outs = [*ids_in, *as_ids(add)], [*ids_out, *as_ids(drop)]
+        delta = contribution(players, ins) - contribution(players, outs)
+        short = len(outs) - len(ins)
+        if empty is not None and short > 0:
+            delta = delta + short * empty.reindex(totals.columns).fillna(0).to_numpy()
         return delta
 
     after = totals.copy()
@@ -102,10 +113,11 @@ def simulate_trade(
     their_add=None,
     punts_me=(),
     punts_them=(),
+    empty=None,
 ) -> tuple[pd.DataFrame, SideResult, SideResult | None]:
     """(totals after, my result, their result or None for a free-agent move)."""
     after = apply_trade(
-        players, totals, me, them, give, get, my_drop, their_drop, my_add, their_add
+        players, totals, me, them, give, get, my_drop, their_drop, my_add, their_add, empty
     )
     mine = _side_delta(totals, after, me, punts_me)
     theirs = None if them is None else _side_delta(totals, after, them, punts_them)
@@ -125,14 +137,15 @@ def _deals_with(players, totals, me, them, weights_me, weights_them):
     theirs = players.loc[(players["team_id"] == them) & ~players["is_ir"]]
     if mine.empty or theirs.empty:
         return []
-    za, zb = mine[COLUMNS].to_numpy(), theirs[COLUMNS].to_numpy()
+    cols = list(totals.columns)
+    za, zb = mine[cols].to_numpy(), theirs[cols].to_numpy()
     va = player_values(mine, weights_me).to_numpy()
     vb = player_values(theirs, weights_them).to_numpy()
     ida, idb = mine.index.to_numpy(), theirs.index.to_numpy()
     na, nb = len(ida), len(idb)
     my_pick, their_pick = best_pickup(players, weights_me), best_pickup(players, weights_them)
-    z_my_pick = players.loc[my_pick, COLUMNS].to_numpy(float) if my_pick is not None else 0
-    z_their_pick = players.loc[their_pick, COLUMNS].to_numpy(float) if their_pick is not None else 0
+    z_my_pick = players.loc[my_pick, cols].to_numpy(float) if my_pick is not None else 0
+    z_their_pick = players.loc[their_pick, cols].to_numpy(float) if their_pick is not None else 0
 
     shapes = []  # (give index tuples, get index tuples, my_drop idx|-1, their_drop idx|-1)
     for i in range(na):
@@ -151,7 +164,7 @@ def _deals_with(players, totals, me, them, weights_me, weights_them):
                 excluded[i] = True
                 shapes.append(((i,), (j1, j2), int(_lowest(va, excluded[None])[0]), -1))
 
-    my_new = np.empty((len(shapes), len(COLUMNS)))
+    my_new = np.empty((len(shapes), len(cols)))
     their_new = np.empty_like(my_new)
     t_me, t_them = totals.loc[me].to_numpy(), totals.loc[them].to_numpy()
     for k, (gi, gj, md, td) in enumerate(shapes):
@@ -184,7 +197,8 @@ def find_trades(
 ) -> pd.DataFrame:
     """Win-win deals for `me`: my E goes up and the partner's doesn't go down.
     Ranked by my change in E, then theirs."""
-    punt_me = np.isin(COLUMNS, punts(weights_by_team[me]))
+    cols = list(totals.columns)
+    punt_me = np.isin(cols, punts(weights_by_team[me]))
     base_me = category_wins(totals.loc[me].to_numpy(), totals.drop(me).to_numpy())
     generic = generic_values(players)
     rows = []
@@ -195,7 +209,7 @@ def find_trades(
         if not found:
             continue
         ids, my_new, their_new = found
-        punt_them = np.isin(COLUMNS, punts(weights_by_team[them]))
+        punt_them = np.isin(cols, punts(weights_by_team[them]))
         fixed = totals.drop([me, them]).to_numpy()
         base_them = category_wins(totals.loc[them].to_numpy(), totals.drop(them).to_numpy())
 
@@ -223,7 +237,7 @@ def find_trades(
                     "gen_give": gen_give,
                     "gen_get": gen_get,
                     "lopsided": abs(gen_give - gen_get) > LOPSIDED_GAP,
-                    **{f"dE_{c}": my_cat[k, i] for i, c in enumerate(COLUMNS)},
+                    **{f"dE_{c}": my_cat[k, i] for i, c in enumerate(cols)},
                 }
             )
     if not rows:
