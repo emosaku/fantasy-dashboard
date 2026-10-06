@@ -39,14 +39,10 @@ Each step ends with a review before the next starts.
    kill switch that pauses Scheduler and closes the site at 100%, and BigQuery
    queries are capped at 30 GiB/day. Details and runbook:
    [killswitch.md](killswitch.md).
-2. **Done (Oct 5):** config, not constants: project, dataset, region from env
-   everywhere; no `fantasy-dash-emk` default left. Summary: [phase0.md](phase0.md).
+2. **Config, not constants:** project, dataset, region from env everywhere; remove
+   every `fantasy-dash-emk` default.
 
 ### Phase 1 — Tenancy, public leagues only (5-10 leagues)
-
-**Built, deployed and tested (Oct 5)**: steps 1-8 below. Details, runbooks, the load
-test and cost per league: [phase1.md](phase1.md). Before launch: create the Google
-sign-in client, do the employer IP check, then onboard leagues for the checkpoint.
 
 1. **League settings:** read each league's scoring from ESPN (categories, which are
    lower-is-better, scoring type, team count, season length) into a `league_settings`
@@ -76,9 +72,6 @@ sign-in client, do the employer IP check, then onboard leagues for the checkpoin
 **Checkpoint:** 5-10 public leagues onboarded; cost per league measured.
 
 ### Phase 2 — Private leagues
-
-**Built, deployed and tested live (Oct 5)**: write-only saved logins, membership
-check, expiry handling. Details: [phase2.md](phase2.md).
 
 Cookies stored one Secret Manager secret per league (or KMS-encrypted), read only by
 ingest; the commissioner's delete button removes them.

@@ -36,7 +36,7 @@ def landing() -> None:
     )
     st.caption(
         "For head-to-head categories leagues (Most Categories or Each Category), any "
-        "category set. Public leagues only for now. Free, no ads."
+        "category set. Public or private leagues. Free, no ads."
     )
     if not league.auth_configured() and not settings.DEV_AUTH_EMAIL:
         st.warning("Sign-in isn't set up on this server yet.")

@@ -155,6 +155,6 @@ def footer() -> None:
     st.divider()
     st.caption(
         "League Lab is an independent, non-commercial project. It is not affiliated "
-        "with, endorsed by or sponsored by ESPN or the NBA. League data is read from "
-        "public league pages. [Privacy](/privacy)"
+        "with, endorsed by or sponsored by ESPN or the NBA. It only reads league data, "
+        "never changes it. [Privacy](/privacy)"
     )

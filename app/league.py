@@ -187,6 +187,15 @@ def current() -> Context:
                 "minutes. Reload the page shortly."
             )
         st.stop()
+    if ctx.doc.get("status") == "needs_login":
+        who = (
+            "Reconnect it on League settings."
+            if ctx.is_commissioner
+            else ("The commissioner can reconnect it.")
+        )
+        st.warning(
+            f"This league's data isn't refreshing: its ESPN login expired or was removed. {who}"
+        )
     if tenancy.record_view(db(), ctx.doc, now()):
         league_doc.clear()
     return ctx

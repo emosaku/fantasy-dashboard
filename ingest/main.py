@@ -29,8 +29,9 @@ from google.cloud import bigquery
 from ingest import registry
 from ingest.bigquery_load import in_list, league_scope, replace_rows
 from ingest.catalog import league_categories
-from ingest.credentials import cookies_for
+from ingest.credentials import EXPIRED, NeedsLogin, cookies_for
 from ingest.espn_client import (
+    LeagueNotAccessible,
     build_league,
     fetch_activity,
     fetch_player_history,
@@ -93,7 +94,13 @@ def ingest_league(league_doc: dict, client, db, cfg: Config, now: dt.datetime) -
     season = int(league_doc.get("season") or cfg.season)
     cookies = cookies_for(league_doc, cfg.project)
 
-    raw = fetch_settings(league_id, season, cookies)
+    try:
+        raw = fetch_settings(league_id, season, cookies)
+    except LeagueNotAccessible as error:
+        # With a saved login, a refusal means the login expired, not a deleted league.
+        if cookies and "no basketball league" not in str(error):
+            raise NeedsLogin(EXPIRED) from None
+        raise
     categories = league_categories(raw["scoringSettings"])
     league = build_league(league_id, season, cookies)
     current = league.currentMatchupPeriod
@@ -173,11 +180,15 @@ def purge_league(league_doc: dict, client, db, cfg: Config) -> None:
     client.query(script).result()
     source = league_doc.get("credentials") or "public"
     if source.startswith("secret:"):
-        from google.cloud import secretmanager  # only needed once private leagues exist
+        from google.api_core.exceptions import NotFound
+        from google.cloud import secretmanager
 
-        secretmanager.SecretManagerServiceClient().delete_secret(
-            name=f"projects/{cfg.project}/secrets/{source.removeprefix('secret:')}"
-        )
+        try:
+            secretmanager.SecretManagerServiceClient().delete_secret(
+                name=f"projects/{cfg.project}/secrets/{source.removeprefix('secret:')}"
+            )
+        except NotFound:
+            pass  # already removed by the commissioner
     registry.delete_league(db, league_id)
     print(f"league {league_id}: purged")
 
@@ -208,6 +219,9 @@ def main(env=os.environ) -> int:
             registry.record_success(db, league_id, fields)
             done.append(league_id)
             print(f"league {league_id}: ok")
+        except NeedsLogin as error:  # waits for the commissioner; not a job failure
+            registry.record_needs_login(db, league_id, str(error), now)
+            print(f"league {league_id}: needs a new ESPN login")
         except Exception as error:  # one league's failure mustn't stop the rest
             registry.record_error(db, league_id, str(error), now)
             failed.append(league_id)

@@ -58,3 +58,11 @@ def test_success_and_error_are_recorded():
     registry.record_success(db, 7, {"last_ingested_at": NOW})
     doc = db.data["leagues"]["7"]
     assert (doc["status"], doc["error"], doc["last_ingested_at"]) == ("active", None, NOW)
+
+
+def test_a_league_waiting_for_a_login_is_skipped_until_asked_for():
+    db = db_with(L8={"status": "needs_login", "last_viewed_at": NOW})
+    assert registry.leagues_to_refresh(db, NOW) == []
+    assert [lg["league_id"] for lg in registry.leagues_to_refresh(db, NOW, {8})] == [8]
+    registry.record_needs_login(db, 8, "expired", NOW)
+    assert db.data["leagues"]["8"]["status"] == "needs_login"

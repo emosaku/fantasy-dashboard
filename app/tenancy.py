@@ -4,13 +4,17 @@ collections. No Streamlit here: every function takes the Firestore client, so th
 tests run against an in-memory fake.
 
 Rules:
-  * Anyone signed in can register a public league, up to MAX_LEAGUES on the site and
-    MAX_LEAGUES_PER_USER each. The person who registers it is its commissioner.
+  * Anyone signed in can register a league -- public, or private with their own ESPN
+    login -- up to MAX_LEAGUES on the site and MAX_LEAGUES_PER_USER each. The person
+    who registers it is its commissioner.
   * Others join only through the league's invite link, and claim a team. A team has
     one member; the commissioner can remove members and rotate the invite link.
   * The commissioner can delete the league: it's marked "deleting" and the ingest
     job removes every row, registry entry and stored credential.
   * A league's data can be refreshed on demand at most once an hour.
+  * A private league's ESPN login can be replaced or removed only by its commissioner.
+    A removed or expired login leaves the league's data as it was, not refreshed,
+    until the commissioner connects a new one.
 """
 
 import datetime as dt
@@ -104,18 +108,9 @@ def _live_leagues(db) -> list[dict]:
     ]
 
 
-def register(
-    db,
-    league_id: int,
-    season: int,
-    user: dict,
-    team_id: int | None,
-    league_name: str,
-    now: dt.datetime,
-    max_leagues: int,
-    max_per_user: int,
-) -> dict:
-    """Add a public league with `user` as commissioner. Returns the league doc."""
+def check_can_register(db, league_id: int, user: dict, max_leagues: int, max_per_user: int):
+    """Raise TenancyError if this league can't be registered by this person now.
+    Checked before a private league's login is saved, and again by register()."""
     existing = get_league(db, league_id)
     if existing and existing.get("status") != "deleting":
         raise TenancyError(
@@ -130,11 +125,28 @@ def register(
     if sum(lg.get("registered_by") == user["uid"] for lg in live) >= max_per_user:
         raise TenancyError(f"You can register up to {max_per_user} leagues.")
 
+
+def register(
+    db,
+    league_id: int,
+    season: int,
+    user: dict,
+    team_id: int | None,
+    league_name: str,
+    now: dt.datetime,
+    max_leagues: int,
+    max_per_user: int,
+    credentials: str = "public",
+) -> dict:
+    """Add a league with `user` as commissioner. Returns the league doc.
+    credentials: "public", or "secret:<name>" for a private league's saved login."""
+    check_can_register(db, league_id, user, max_leagues, max_per_user)
+
     league = {
         "season": int(season),
         "league_name": league_name,
         "status": "pending",  # until the first data load finishes
-        "credentials": "public",
+        "credentials": credentials,
         "invite_code": new_invite_code(),
         "registered_by": user["uid"],
         "created_at": now,
@@ -193,6 +205,27 @@ def rotate_invite(db, league_id: int) -> str:
     code = new_invite_code()
     _league_ref(db, league_id).set({"invite_code": code}, merge=True)
     return code
+
+
+def set_login(db, league_id: int, credentials: str, now: dt.datetime) -> None:
+    """A new ESPN login was saved: the league goes back to loading."""
+    _league_ref(db, league_id).set(
+        {"credentials": credentials, "status": "pending", "error": None, "login_saved_at": now},
+        merge=True,
+    )
+
+
+def remove_login(db, league_id: int, now: dt.datetime) -> None:
+    """The commissioner removed the login: keep the data, stop refreshing."""
+    _league_ref(db, league_id).set(
+        {
+            "credentials": "removed",
+            "status": "needs_login",
+            "error": "The commissioner removed this league's ESPN login.",
+            "login_removed_at": now,
+        },
+        merge=True,
+    )
 
 
 def mark_deleting(db, league_id: int, now: dt.datetime) -> None:

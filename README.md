@@ -1,16 +1,17 @@
 # League Lab
 
 > **Branch `multi-league`.** This branch turns the single-league dashboard into
-> **League Lab**: the same analysis for any public ESPN head-to-head categories
-> fantasy basketball league, with Google sign-in, invite links, per-league data and
-> near-zero running cost. It's a separate site in its own Google Cloud project
+> **League Lab**: the same analysis for any ESPN head-to-head categories fantasy
+> basketball league (public, or private with a manager's ESPN login), with Google
+> sign-in, invite links, per-league data and near-zero running cost. It's a separate site in its own Google Cloud project
 > (`league-lab-emk`). The original league's site stays on `main`, untouched; branch
 > `InitialSingleLeagueBuild` is a snapshot of `main` from before this work began.
 
 ## What it does
 
-A commissioner signs in with Google, registers a public league from its ESPN link,
-and shares an invite link; members join and claim their team. Every league gets:
+A commissioner signs in with Google, registers a league from its ESPN link (a private
+one with their ESPN login, saved so only the data pull can read it), and shares an
+invite link; members join and claim their team. Every league gets:
 
 - **Compare**: any two teams, category by category, for a week or the season
 - **Power Rankings**: all-play rankings, plus an injury-aware projected finish
@@ -31,6 +32,7 @@ better; FG%, FT%, 3PT% and A/TO are ratios), Most Categories or Each Category.
 | [docs/multiLeagueDocs/phase0.md](docs/multiLeagueDocs/phase0.md) | Phase 0: the project, guardrails, config |
 | [docs/multiLeagueDocs/killswitch.md](docs/multiLeagueDocs/killswitch.md) | Budget kill switch runbook |
 | [docs/multiLeagueDocs/phase1.md](docs/multiLeagueDocs/phase1.md) | Phase 1: tenancy, generic scoring, ingest fan-out, sign-in, ops, load test, cost, what's left |
+| [docs/multiLeagueDocs/phase2.md](docs/multiLeagueDocs/phase2.md) | Phase 2: private leagues, write-only saved logins, expiry |
 | [docs/initialSingleLeagueBuildDocs/](docs/initialSingleLeagueBuildDocs/) | The original single-league build |
 
 ## Architecture
@@ -67,7 +69,8 @@ pytest
 │   ├── settings.py           # environment config
 │   ├── league.py             # who's signed in, which league, its rules (from Firestore)
 │   ├── tenancy.py            # registry rules: register, invite, join, delete, refresh limit
-│   ├── onboarding.py         # registration checks against ESPN
+│   ├── onboarding.py         # registration checks against ESPN (public or with a login)
+│   ├── espn_login.py         # save/remove a private league's login (write-only)
 │   ├── queries.py            # every BigQuery read (m_* tables, one league per query)
 │   ├── refresh.py            # starts the ingest job (refresh, first load, purge)
 │   ├── categories.py         # generic categories: counts, ratios, direction, formatting

@@ -129,3 +129,33 @@ def test_upsert_user_keeps_created_at():
     tenancy.upsert_user(db, ANA, NOW + dt.timedelta(days=1))
     user = db.collection("users").document(ANA["uid"]).get().to_dict()
     assert user["created_at"] == NOW and user["last_seen_at"] == NOW + dt.timedelta(days=1)
+
+
+# --- Private leagues (Phase 2) -----------------------------------------------------
+
+
+def test_private_league_records_its_saved_login():
+    db = FakeFirestore()
+    tenancy.register(db, 5, 2026, ANA, 1, "Private", NOW, 10, 3, credentials="secret:league-5-espn")
+    assert tenancy.get_league(db, 5)["credentials"] == "secret:league-5-espn"
+
+
+def test_caps_are_checked_before_a_login_is_saved():
+    db = FakeFirestore()
+    register(db, 1)
+    with pytest.raises(tenancy.TenancyError, match="already on League Lab"):
+        tenancy.check_can_register(db, 1, BEN, 10, 3)
+    tenancy.check_can_register(db, 2, BEN, 10, 3)  # fine
+
+
+def test_removing_and_reconnecting_a_login():
+    db = FakeFirestore()
+    tenancy.register(db, 5, 2026, ANA, 1, "Private", NOW, 10, 3, credentials="secret:league-5-espn")
+    tenancy.remove_login(db, 5, NOW)
+    league = tenancy.get_league(db, 5)
+    assert (league["credentials"], league["status"]) == ("removed", "needs_login")
+    tenancy.set_login(db, 5, "secret:league-5-espn", NOW)
+    league = tenancy.get_league(db, 5)
+    assert (league["credentials"], league["status"], league["error"]) == (
+        "secret:league-5-espn", "pending", None,
+    )  # fmt: skip
