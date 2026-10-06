@@ -39,6 +39,11 @@ What the dashboard does:
 The original build plan, and every feature added since, lives in
 [`docs/proposal.md`](docs/proposal.md).
 
+User guides: [`docs/site-guide.md`](docs/site-guide.md) walks through every page and
+feature; [`docs/trade-analyzer.md`](docs/trade-analyzer.md) covers the Trade Analyzer in
+depth; [`docs/metrics.md`](docs/metrics.md) explains every number (z-scores, category
+wins, tiers, value, luck, projections, season totals, position baselines).
+
 ## Architecture
 
 ```
@@ -167,7 +172,8 @@ FantasyDashboard/
 ├── tests/                       # mirrors ingest/ and app/; fixtures/ holds the 4-team league
 ├── .github/workflows/           # ci.yml (tests on every push); deploy stubs for Step 7
 ├── docs/                        # proposal.md (the plan), step4-7 docs, gcp-apis.md,
-│                                  gcp-services.md
+│                                  gcp-services.md; site-guide.md, trade-analyzer.md and
+│                                  metrics.md (user guides)
 ├── requirements.txt, requirements-dev.txt
 ├── pyproject.toml               # ruff + pytest config only
 ├── .env.example

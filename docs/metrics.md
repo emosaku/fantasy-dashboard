@@ -14,12 +14,15 @@ how it's computed, and where it shows up. Most of them build on one idea, the
 | [Category ranks](#4-category-ranks) | Each team's 1-14 rank per category, by roster or by results | Roster Strength → Category Rankings |
 | [All-play record](#5-all-play-record-and-power-rankings) | Your record if you'd played every team every week | Power Rankings |
 | [Luck](#6-luck) | Actual win % minus all-play win % | Matchups and Luck |
-| [Category wins (E)](#7-category-wins-e) | Categories you'd win against every other team | Trade Analyzer |
-| [Tiers and weights](#8-tiers-and-weights) | Which categories are worth fighting for | Trade Analyzer |
-| [Value to you / general value](#9-value-to-you-and-general-value) | A player's worth to your team / to anyone | Trade Analyzer |
-| [Empty roster spot](#10-empty-roster-spot) | The z of a roster spot with nobody in it | Mock trade, Suggest a pickup |
-| [Player rankings](#11-player-rankings) | Every player ranked per category and overall | Player Rankings |
+| [Category wins (E)](#7-category-wins-e) | Categories you'd win against every other team | Trade Analyzer: every tab, incl. Offer Builder and Mock trade's step by step |
+| [Tiers and weights](#8-tiers-and-weights) | Which categories are worth fighting for | Trade Analyzer, Offer Builder's block notes, Compare's fit row |
+| [Value to you / general value](#9-value-to-you-and-general-value) | A player's worth to your team / to anyone | Trade Analyzer (incl. the lopsided check), Compare's fit row |
+| [Empty roster spot](#10-empty-roster-spot) | The z of a roster spot with nobody in it | Mock trade, Suggest a pickup, step by step |
+| [Player rankings](#11-player-rankings) | Every player ranked per category and overall | Player Rankings, Compare's stat table |
 | [Projected finish](#12-projected-finish) | Injury-aware all-play record through the end of the season | Power Rankings |
+| [Season totals](#13-season-totals) | Per-game stats × games played, ranked among the pool | Compare (Season totals) |
+| [Position baseline](#14-position-baseline) | The average starting PG/SG/SF/PF/C | Compare (Compare against) |
+| [Verdicts, deal labels and pitches](#15-verdicts-deal-labels-and-pitches) | One-line judgments built from the numbers above | Compare, Create a trade, Offer Builder |
 
 ---
 
@@ -172,7 +175,19 @@ are this breakdown.
 - The **all-play matchup record from totals** (e.g. 10-3-0) is shown next to E. Every
   category counts there, punted or not, because a real matchup counts them all.
 
-**Where:** `app/analysis/objective.py`.
+**Where it's used:**
+
+- **Waiver wire, Trade finder:** each move's change in your E, explained category by
+  category.
+- **Create a trade and Offer Builder:** two changes per deal: **ΔE you** and **ΔE
+  them**, the partner's change judged by *their* own tiers and punts. Every Offer
+  Builder result has ΔE you > 0; its acceptance level then filters on ΔE them (see
+  section 15).
+- **Mock trade's step by step:** E and matchup record at *Now*, *Trade only* and
+  *Trade + your moves*, so you can see what the trade and your own adds/drops each
+  contribute.
+
+**Where:** `app/analysis/objective.py` (E), `app/analysis/trades.py` (deal scoring).
 
 ## 8. Tiers and weights
 
@@ -206,6 +221,15 @@ The **Category strategy** overrides replace a category's raw weight with Lock 0.
 Swing 1.5 or Punt 0 before scaling. If nothing is within reach anywhere, every
 non-punted category gets weight 1.
 
+**Where tiers show up beyond the Trade Analyzer's scoring:**
+
+- **Offer Builder's trade block:** a player whose positive z-scores sit mostly in your
+  *Punt* or *Lock* categories is noted ("value mostly in your Punt categories"): he
+  costs you the least to trade.
+- **Compare's fit row:** "70% of his value is in your Swing categories" -- each
+  player's weighted value (section 9) split by the tier each category is in, counting
+  only categories where he adds positive value.
+
 ## 9. Value to you and general value
 
 Two ways to put one number on a player (`app/analysis/weights.py`):
@@ -222,7 +246,12 @@ general value = Σ  player's z                       (no weights)
   player. It's the **fairness check**: a deal is **lopsided** when the general value
   given and received differ by more than **1.5**, because a manager who checks the
   rankings will likely refuse it. *Create a trade* uses it to label deals *They'd
-  likely say no*.
+  likely say no*; Offer Builder drops lopsided deals under *Win-win* and *Close call*
+  and flags them under *Max gain*.
+- **Compare's "Fit for your team"** shows both side by side for each player (and for a
+  position baseline), so two players with similar overall ranks can be told apart by
+  how much they help *your* roster. It uses the same weights as the Trade Analyzer, so
+  the numbers match.
 
 ## 10. Empty roster spot
 
@@ -250,6 +279,11 @@ and **overall by total z** (the sum across the 9 categories, which is the same a
 general value) (`app/analysis/rankings.py`). Ranks are league-wide: among rostered
 players and the top free agents together.
 
+**Compare's stat table** shows the same ranks beside each value (they're computed from
+the whole pool, not just the players being compared, so they always match Player
+Rankings), and its *Overall rank* footer is the same overall rank. A position baseline's
+rank is where its average z would land among the pool.
+
 ## 12. Projected finish
 
 Power Rankings' *Projected finish* (`app/analysis/projection.py`) keeps the real
@@ -265,6 +299,86 @@ rosters:
 
 It sums every available rostered player rather than a real starting lineup, so it
 doesn't model a manager moving a bench player into an injured starter's spot.
+
+## 13. Season totals
+
+Compare's **Show: Season totals** turns per-game numbers into a season's worth, so games
+played count (`compare.py`, `season_totals`):
+
+```
+counting categories:  total = per-game stat × games played
+percentages:          season makes ÷ season attempts   (makes = per-game makes × games)
+```
+
+Games played is the stat window's own: **projected games** for *Projected*, games so far
+for *Season*. For *Blended* (which has no raw stat line of its own) a player's season
+line is used once he has one, otherwise his projection.
+
+Totals are **ranked among every pool player's totals**, not converted to z-scores. A
+counting total ranks by the total itself. A percentage ranks by its season **impact**,
+the extra makes over a league-average shooter on the same season volume:
+
+```
+impact = season makes − league rate × season attempts      (league rate pooled over the pool)
+```
+
+so 600 attempts at 52% can outrank 100 attempts at 60%. In totals mode the verdict and the
+bold "best" cell use the same total or impact. The charts and the fit row stay per game
+(they're built on per-game z-scores), and the page says so.
+
+Example (projected): a center at 11.1 rebounds a game ranks #11; over his projected 73
+games (810 rebounds) he ranks #6, because players with similar per-game numbers project
+to fewer games.
+
+## 14. Position baseline
+
+Compare's **Compare against: average starting PG/SG/SF/PF/C** (`compare.py`,
+`position_baseline`). The members are every **rostered** player at that position in an
+**active lineup slot** (not bench, not IR) in the chosen stat window, 17 to 31 per
+position in this league. The baseline is a full row on the page:
+
+| Field | How it's built |
+| --- | --- |
+| z per category | The members' average z |
+| Counting value | The members' average per-game stat |
+| Percentage | **Pooled**: all members' makes ÷ all members' attempts (never an average of percentages); makes/attempts shown are the members' averages |
+| Rank | Where that average z would land among the whole pool |
+| Season totals | The members' average totals (percentages pooled again) |
+| Fit for your team | The average z run through your weights, like any player |
+| Recent form | The baseline recomputed in each window |
+| Durability | The members' average games over the last 3 seasons |
+
+Example (projected): the average starting C shoots 53.5% on 11.5 attempts and averages
+9.4 rebounds and 1.3 blocks, about 20th-30th in the league in each of those.
+
+## 15. Verdicts, deal labels and pitches
+
+Several one-line judgments are counted straight from the numbers above, never written
+by a model:
+
+- **Compare's head-to-head verdict** (exactly two entries): "A wins 6 of 9 categories;
+  B is better in FT%, 3PT% and STL." It counts category wins by **z** (per game) or by
+  **season total / impact** (totals mode), so percentages are judged with volume. Equal
+  values are ties and favor neither side.
+- **Create a trade's labels** (one target player): *Likely to work* (ΔE you > 0, ΔE them
+  ≥ 0, not lopsided in your favor), *Costs you* (they'd accept, but ΔE you ≤ 0: the
+  player's realistic price), *They'd likely say no* (helps you, but costs them or looks
+  lopsided).
+- **Offer Builder's acceptance levels** (a filter you pick; every result has ΔE you > 0):
+
+  | Level | Rule |
+  | --- | --- |
+  | Win-win | ΔE them ≥ 0 and not lopsided |
+  | Close call | ΔE them ≥ −2 and not lopsided |
+  | Max gain | no limit on ΔE them; lopsided deals shown and flagged |
+
+  Results are ranked by ΔE you, then ΔE them, with near-duplicates dropped (a deal that
+  only adds a throw-in with no extra gain). Uneven deals keep both rosters full: the side
+  that ends up with extra players drops its lowest-value ones, and the side left short
+  picks up that many of the best free agents, each by its own weights.
+- **Offer Builder's pitch:** the *partner's* per-category change, phrased for them to
+  read: "This helps you in AST, 3PM: you'd pass 2 teams in AST, 1 in 3PM. You'd give up
+  1 team in BLK."
 
 ---
 
