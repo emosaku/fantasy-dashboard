@@ -58,7 +58,7 @@ mine = ctx.my_team
 admin = ctx.is_commissioner
 if mine is None and not admin:
     st.info("Pick your team on the League settings page to get recommendations for it.")
-    st.page_link("pages/league_admin.py", label="League settings", icon=":material/tune:")
+    st.page_link("views/league_admin.py", label="League settings", icon=":material/tune:")
     st.stop()
 c1, c2, c3 = st.columns([1.6, 1, 1])
 me = c1.selectbox(
@@ -148,7 +148,7 @@ def compare_players(ids) -> None:
     takes at most 4; an uneven Offer Builder deal can involve up to 6, so clip to
     the first 4 (give side first -- the players this manager is giving up)."""
     st.session_state["compare-players"] = [int(i) for i in ids][:4]
-    st.switch_page("pages/1_Compare.py")
+    st.switch_page("views/1_Compare.py")
 
 
 profile_tab, waiver_tab, finder_tab, create_tab, mock_tab = st.tabs(

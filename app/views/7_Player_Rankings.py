@@ -145,6 +145,6 @@ if c1.button(
     else None,
 ):
     st.session_state["compare-players"] = selected_ids
-    st.switch_page("pages/1_Compare.py")
+    st.switch_page("views/1_Compare.py")
 if selected_ids:
     c2.caption(f"{len(selected_ids)} selected: {', '.join(shown.loc[selected_ids, 'player_name'])}")

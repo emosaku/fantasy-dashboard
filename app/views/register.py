@@ -66,7 +66,7 @@ def start_first_load() -> None:
         "Registered. The first data load takes a few minutes; then share the invite link "
         "from League settings."
     )
-    st.page_link("pages/league_admin.py", label="Open League settings", icon=":material/tune:")
+    st.page_link("views/league_admin.py", label="Open League settings", icon=":material/tune:")
 
 
 if private:

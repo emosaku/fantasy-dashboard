@@ -176,7 +176,7 @@ def current() -> Context:
         st.info(
             "You're not in a league yet. Register one, or open your commissioner's invite link."
         )
-        st.page_link("pages/register.py", label="Register a league", icon=":material/add:")
+        st.page_link("views/register.py", label="Register a league", icon=":material/add:")
         st.stop()
     ctx = build_context(league_id)
     if ctx is None:

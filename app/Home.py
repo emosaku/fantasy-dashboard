@@ -1,5 +1,5 @@
 """League Lab's entry point. Multipage app via st.navigation; the feature pages live
-in app/pages/. Signed out, only the landing page, the invite page and the privacy
+in app/views/. Signed out, only the landing page, the invite page and the privacy
 policy exist. Run locally from the repo root with:
 
     streamlit run app/Home.py
@@ -21,8 +21,10 @@ if settings.SHUTDOWN:
     )
     st.stop()
 
-PRIVACY = st.Page("pages/privacy.py", title="Privacy", icon=":material/policy:", url_path="privacy")
-JOIN = st.Page("pages/join.py", title="Join a league", icon=":material/group_add:", url_path="join")
+# Page files must not live in a folder named pages/: with one next to this file, a fresh
+# server process serves each of them straight from its URL, skipping the sign-in gate.
+PRIVACY = st.Page("views/privacy.py", title="Privacy", icon=":material/policy:", url_path="privacy")
+JOIN = st.Page("views/join.py", title="Join a league", icon=":material/group_add:", url_path="join")
 
 
 def landing() -> None:
@@ -88,22 +90,22 @@ def home() -> None:
 
 
 PAGES = {
-    "compare": st.Page("pages/1_Compare.py", title="Compare", icon=":material/compare_arrows:"),
+    "compare": st.Page("views/1_Compare.py", title="Compare", icon=":material/compare_arrows:"),
     "power": st.Page(
-        "pages/2_Power_Rankings.py", title="Power Rankings", icon=":material/leaderboard:"
+        "views/2_Power_Rankings.py", title="Power Rankings", icon=":material/leaderboard:"
     ),
     "luck": st.Page(
-        "pages/3_Matchups_and_Luck.py", title="Matchups and Luck", icon=":material/casino:"
+        "views/3_Matchups_and_Luck.py", title="Matchups and Luck", icon=":material/casino:"
     ),
-    "txn": st.Page("pages/4_Transactions.py", title="Transactions", icon=":material/swap_horiz:"),
+    "txn": st.Page("views/4_Transactions.py", title="Transactions", icon=":material/swap_horiz:"),
     "strength": st.Page(
-        "pages/5_Roster_Strength.py", title="Roster Strength", icon=":material/fitness_center:"
+        "views/5_Roster_Strength.py", title="Roster Strength", icon=":material/fitness_center:"
     ),
     "trade": st.Page(
-        "pages/6_Trade_Analyzer.py", title="Trade Analyzer", icon=":material/handshake:"
+        "views/6_Trade_Analyzer.py", title="Trade Analyzer", icon=":material/handshake:"
     ),
     "players": st.Page(
-        "pages/7_Player_Rankings.py", title="Player Rankings", icon=":material/person_search:"
+        "views/7_Player_Rankings.py", title="Player Rankings", icon=":material/person_search:"
     ),
 }
 PAGE_BLURBS = [
@@ -134,9 +136,9 @@ nav = st.navigation(
         "": [st.Page(home, title="Home", icon=":material/home:", default=True)],
         "Analysis": list(PAGES.values()),
         "Leagues": [
-            st.Page("pages/league_admin.py", title="League settings", icon=":material/tune:",
+            st.Page("views/league_admin.py", title="League settings", icon=":material/tune:",
                     url_path="league"),
-            st.Page("pages/register.py", title="Register a league", icon=":material/add:",
+            st.Page("views/register.py", title="Register a league", icon=":material/add:",
                     url_path="register"),
             JOIN,
             PRIVACY,

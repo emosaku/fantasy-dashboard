@@ -58,9 +58,9 @@ secret at once; the purge deletes it again if it's still there.
 | `app/onboarding.py` | `NeedsLogin`, `clean_cookies`, login checks, own-team detection |
 | `app/espn_login.py` | new: write-only save/remove of a league's login |
 | `app/tenancy.py` | `check_can_register`, `credentials` on register, `set_login`, `remove_login` |
-| `app/pages/register.py`, `league_admin.py` | private registration; ESPN login section; delete removes the login |
+| `app/views/register.py`, `league_admin.py` | private registration; ESPN login section; delete removes the login |
 | `app/league.py` | needs-login banner |
-| `app/pages/privacy.py`, `Home.py`, `ui.py` | policy covers the saved login; public-only wording removed |
+| `app/views/privacy.py`, `Home.py`, `ui.py` | policy covers the saved login; public-only wording removed |
 | `ingest/credentials.py`, `main.py`, `registry.py` | `NeedsLogin`, needs_login status, skip until reconnected, purge tolerant of a removed secret |
 | IAM | custom role `leagueSecretWriter` on `dashboard-sa`, condition `league-*` |
 
