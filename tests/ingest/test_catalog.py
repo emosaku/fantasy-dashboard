@@ -1,7 +1,16 @@
 """Reading a league's categories from its ESPN scoring settings (ingest/catalog.py)."""
 
 import pytest
-from ingest.catalog import PLAYER_STATS, UnsupportedLeague, league_categories, scoring_type
+from ingest.catalog import (
+    CATEGORIES,
+    PLAYER_STATS,
+    POINTS,
+    UnsupportedLeague,
+    league_categories,
+    league_format,
+    league_scoring,
+    scoring_type,
+)
 
 # ESPN stat ids: 19 FG%, 20 FT%, 17 3PM, 6 REB, 3 AST, 2 STL, 1 BLK, 11 TO, 0 PTS.
 NINE_CAT = [19, 20, 17, 6, 3, 2, 1, 11, 0]
@@ -64,3 +73,39 @@ def test_unsupported_categories_are_named():
 
 def test_every_category_input_is_ingested():
     assert {"FGM", "FGA", "3PA", "TO", "GP"} <= set(PLAYER_STATS)
+
+
+# --- Points leagues -----------------------------------------------------------------
+
+
+def points_settings(items, scoring_type="H2H_POINTS"):
+    return {"scoringType": scoring_type, "scoringItems": items}
+
+
+def test_format_comes_from_espns_scoring_type():
+    assert league_format(settings(NINE_CAT)) == CATEGORIES
+    assert league_format(settings(NINE_CAT, scoring_type="H2H_CATEGORY")) == CATEGORIES
+    assert league_format(points_settings([])) == POINTS
+    with pytest.raises(UnsupportedLeague, match="head-to-head"):
+        league_format(settings(NINE_CAT, scoring_type="ROTISSERIE"))
+
+
+def test_point_values_keep_espns_order_and_skip_zeros():
+    items = [{"statId": 0, "points": 1}, {"statId": 14, "points": -1},
+             {"statId": 20, "points": 0}, {"statId": 38, "points": 10}]  # fmt: skip
+    scoring = league_scoring(points_settings(items))
+    assert [(s["stat"], s["points"], s["stat_id"]) for s in scoring] == [
+        ("PTS", 1.0, 0), ("FGA", -1.0, 14), ("TD", 10.0, 38),
+    ]  # fmt: skip
+
+
+def test_an_override_equal_to_the_base_value_is_fine():
+    items = [{"statId": 0, "points": 1, "pointsOverrides": {"11": 1.0}}]
+    assert league_scoring(points_settings(items))[0]["points"] == 1.0
+
+
+def test_categories_and_points_readers_refuse_the_other_format():
+    with pytest.raises(UnsupportedLeague):
+        league_categories(points_settings([{"statId": 0, "points": 1}]))
+    with pytest.raises(UnsupportedLeague):
+        league_scoring(settings(NINE_CAT))

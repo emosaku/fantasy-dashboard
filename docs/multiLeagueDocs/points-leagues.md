@@ -1,7 +1,29 @@
 # Points leagues: build proposal
 
-*Proposal, October 6, 2026. Branch `PointsLeague`, cut from `multi-league` at `f9d6071`.
-No code yet.*
+*Proposal, October 6, 2026. Branch `PointsLeague`, cut from `multi-league` at `f9d6071`.*
+
+> **Built, October 7, 2026** (all six phases; how it works for users is in
+> [points-guide.md](points-guide.md)). How the build differs from this proposal:
+>
+> - **No new views or m_* tables.** The four points tables (`league_scoring`,
+>   `player_points`, `matchup_scores`, `pro_schedule`) are small and clustered by
+>   league, so the pages read them directly; all-play, luck and projections are
+>   computed in tested Python (`app/points/model.py`). `rosters` and `free_agents`
+>   gained `pro_team` and `eligible_slots`, `teams` gained points for and against.
+> - **`pro_schedule` is per league**, not shared, so loading and purging stay
+>   league-scoped. Matchup weeks are mapped Monday to Sunday from opening night, then
+>   from ESPN's own days once a week is played.
+> - **A format mismatch stops refreshing** instead of loading what it can: the data
+>   stays as it was and the banner says so until `scripts/set_format.py` reloads it.
+> - **σ is one league-wide spread** (12% of an average week until 3 weeks are played),
+>   not each team's own or last season's.
+> - **The season rollover confirm** isn't built: League Lab doesn't roll leagues into
+>   a new season yet. `format_season` is stored for when it does.
+> - **Points by source** groups any negative-valued stat as "Misses and turnovers".
+> - **Open questions** taken as recommended: the format is ESPN's, confirmed not
+>   chosen; the headline is expected wins a week; all pages ship together.
+> - **Tested** on a real public league loaded as default-points into a scratch
+>   dataset; a real points league is next.
 
 ## Summary
 

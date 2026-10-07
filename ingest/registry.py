@@ -6,7 +6,10 @@ Collections (all small documents):
                           "secret:<name>" for a private league, or "removed"),
                           invite_code, registered_by, created_at, last_viewed_at,
                           last_ingested_at, last_refresh_at, scores_final_through,
-                          activity_through_ms, scoring_type, categories, error
+                          activity_through_ms, scoring_type, categories, error,
+                          format ("categories" | "points", locked for format_season),
+                          format_locked_at, format_confirmed_by, format_mismatch,
+                          scoring and lineup_slots (points leagues), points_check
   members/{league_id}__{uid} -- league_id, uid, email, name, team_id, role, joined_at
   users/{uid}          -- email, name, created_at, last_seen_at
 
@@ -75,6 +78,14 @@ def record_needs_login(db, league_id: int, message: str, now: dt.datetime) -> No
     the commissioner reconnects (the website then sets it back to pending)."""
     db.collection("leagues").document(str(league_id)).set(
         {"status": "needs_login", "error": message[:500], "last_error_at": now}, merge=True
+    )
+
+
+def record_format_mismatch(db, league_id: int, espn_format: str, now: dt.datetime) -> None:
+    """ESPN's scoring type no longer matches the locked format: keep the data as it
+    was, flag it for the banner, and don't refresh until the site owner reloads it."""
+    db.collection("leagues").document(str(league_id)).set(
+        {"format_mismatch": espn_format, "last_error_at": now}, merge=True
     )
 
 

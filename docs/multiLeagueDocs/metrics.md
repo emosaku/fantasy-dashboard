@@ -1,5 +1,8 @@
 # League Lab metrics: z-scores and everything built on them
 
+*This guide covers categories leagues. For points leagues, see
+[points-guide.md](points-guide.md).*
+
 *Last updated October 6, 2026. League Lab version: every metric works with each league's
 own categories and scoring. The single-league site's version is on `main`
 (`docs/metrics.md`).*

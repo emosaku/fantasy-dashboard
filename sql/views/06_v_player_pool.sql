@@ -4,8 +4,8 @@ CREATE OR REPLACE VIEW `{project}.{dataset}.v_player_pool` AS
 WITH pool AS (
   SELECT
     league_id, season, player_id, player_name, position,
-    CAST(NULL AS STRING) AS pro_team, team_id, lineup_slot, injury_status,
-    expected_return_date
+    pro_team, team_id, lineup_slot, injury_status,
+    expected_return_date, eligible_slots
   FROM `{project}.{dataset}.rosters`
 
   UNION ALL
@@ -13,7 +13,7 @@ WITH pool AS (
   SELECT
     league_id, season, player_id, player_name, position,
     pro_team, CAST(NULL AS INT64) AS team_id, CAST(NULL AS STRING) AS lineup_slot,
-    injury_status, CAST(NULL AS DATE) AS expected_return_date
+    injury_status, CAST(NULL AS DATE) AS expected_return_date, eligible_slots
   FROM `{project}.{dataset}.free_agents`
 )
 

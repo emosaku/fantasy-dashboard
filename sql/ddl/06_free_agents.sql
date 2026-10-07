@@ -8,6 +8,12 @@ CREATE TABLE IF NOT EXISTS `{project}.{dataset}.free_agents` (
   position STRING,
   pro_team STRING,
   injury_status STRING,
+  eligible_slots STRING,
   ingested_at TIMESTAMP NOT NULL
 )
 CLUSTER BY league_id;
+
+-- Added for points leagues (CREATE IF NOT EXISTS doesn't add columns to an
+-- existing table).
+ALTER TABLE `{project}.{dataset}.free_agents`
+  ADD COLUMN IF NOT EXISTS eligible_slots STRING;

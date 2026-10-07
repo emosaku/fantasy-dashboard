@@ -1,5 +1,8 @@
 # League Lab Trade Analyzer: how it works
 
+*This guide covers categories leagues. For points leagues, see
+[points-guide.md](points-guide.md).*
+
 *Last updated October 6, 2026. League Lab version: works with any league's categories and scoring. The single-league site's version is on `main` (`docs/trade-analyzer.md`).*
 
 ## Overview

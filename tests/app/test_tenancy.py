@@ -159,3 +159,12 @@ def test_removing_and_reconnecting_a_login():
     assert (league["credentials"], league["status"], league["error"]) == (
         "secret:league-5-espn", "pending", None,
     )  # fmt: skip
+
+
+def test_registering_locks_the_format_for_the_season():
+    db = FakeFirestore()
+    league = tenancy.register(db, 222, 2027, ANA, 1, "Points", NOW, 10, 3,
+                              league_format="points")  # fmt: skip
+    assert (league["format"], league["format_season"]) == ("points", 2027)
+    assert league["format_confirmed_by"] == ANA["uid"] and league["format_locked_at"] == NOW
+    assert register(FakeFirestore())["format"] == "categories"  # the default

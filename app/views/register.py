@@ -16,8 +16,8 @@ import tenancy
 
 st.title("Register a league")
 st.caption(
-    "ESPN fantasy basketball leagues, head-to-head categories (Most Categories or Each "
-    "Category), public or private. You become the league's commissioner here: you get an "
+    "ESPN fantasy basketball leagues, head-to-head points or categories (Most Categories "
+    "or Each Category), public or private. You become the league's commissioner here: you get an "
     "invite link to share, and you can delete the league's data at any time."
 )
 user = league.current_user()
@@ -126,6 +126,7 @@ if private:
             settings.MAX_LEAGUES,
             settings.MAX_LEAGUES_PER_USER,
             credentials=credentials,
+            league_format=found["format"],
         )
     except tenancy.TenancyError as error:
         espn_login.remove(secrets, settings.PROJECT, league_id)
@@ -133,18 +134,40 @@ if private:
         st.stop()
     team = next((t["team_name"] for t in found["teams"] if t["team_id"] == found["my_team"]), None)
     st.info(f"Connected **{found['league_name']}**" + (f" as **{team}**." if team else "."))
+    st.caption(
+        f"Format locked for the {settings.SEASON - 1}-{str(settings.SEASON)[2:]} season: "
+        + ("head-to-head points." if found["format"] == "points" else "head-to-head categories.")
+    )
     start_first_load()
     st.stop()
 
-scoring = "Each Category" if preview["scoring_type"] == "H2H_EACH_CATEGORY" else "Most Categories"
 st.success(f"**{preview['league_name']}** can be added.")
-st.markdown(
-    f"{len(preview['teams'])} teams · {scoring} · categories: "
-    + ", ".join(
-        c["category"] + (" (lower wins)" if c["lower_is_better"] else "")
-        for c in preview["categories"]
+season_label = f"{settings.SEASON - 1}-{str(settings.SEASON)[2:]}"
+if preview["format"] == "points":
+    st.markdown(
+        f"{len(preview['teams'])} teams · head-to-head points · "
+        + ", ".join(f"{s['stat']} {s['points']:+g}" for s in preview["scoring"])
     )
-)
+    st.info(
+        f"This league plays **head-to-head points**. League Lab will run its points tools "
+        f"for the {season_label} season, and the format can't change until next season."
+    )
+else:
+    scoring = (
+        "Each Category" if preview["scoring_type"] == "H2H_EACH_CATEGORY" else "Most Categories"
+    )
+    st.markdown(
+        f"{len(preview['teams'])} teams · {scoring} · categories: "
+        + ", ".join(
+            c["category"] + (" (lower wins)" if c["lower_is_better"] else "")
+            for c in preview["categories"]
+        )
+    )
+    st.info(
+        f"This league plays **head-to-head categories ({scoring})**. League Lab will run "
+        f"its categories tools for the {season_label} season, and the format can't change "
+        "until next season."
+    )
 
 team_options = [None, *[t["team_id"] for t in preview["teams"]]]
 names = {t["team_id"]: t["team_name"] for t in preview["teams"]}
@@ -155,7 +178,8 @@ with st.form("register"):
         format_func=lambda t: "I don't have a team in this league" if t is None else names[t],
     )
     agree = st.checkbox(
-        "I'm in this league, and I'm OK with League Lab storing its public data (see Privacy)."
+        "I'm in this league, the format above is right, and I'm OK with League Lab storing "
+        "its public data (see Privacy)."
     )
     submitted = st.form_submit_button("Register league", type="primary", disabled=False)
 
@@ -174,6 +198,7 @@ if submitted:
             league.now(),
             settings.MAX_LEAGUES,
             settings.MAX_LEAGUES_PER_USER,
+            league_format=preview["format"],
         )
     except tenancy.TenancyError as error:
         st.error(str(error))

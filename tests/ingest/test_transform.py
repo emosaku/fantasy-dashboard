@@ -9,16 +9,23 @@ from types import SimpleNamespace
 
 import pandas as pd
 from ingest.transform import (
+    bench_slots,
+    lineup_slots,
+    points_mismatches,
     transform_free_agents,
     transform_league_categories,
     transform_league_settings,
     transform_matchup_categories,
+    transform_matchup_scores,
     transform_player_details,
+    transform_player_points,
     transform_player_seasons,
     transform_player_stats,
+    transform_pro_schedule,
     transform_rosters,
     transform_teams,
     transform_transactions,
+    week_of,
 )
 
 AT = dt.datetime(2026, 10, 4, tzinfo=dt.UTC)
@@ -209,3 +216,90 @@ def test_player_details_keep_injury_fields_and_outlook():
     assert df.loc[1, "expected_return_date"] == dt.date(2026, 11, 20)
     assert pd.isna(df.loc[2, "expected_return_date"])
     assert pd.isna(df.loc[2, "season_outlook"])
+
+
+# --- Points leagues -----------------------------------------------------------------
+
+SCORING = [{"stat": "PTS", "points": 1.0}, {"stat": "FGA", "points": -1.0},
+           {"stat": "REB", "points": 1.0}]  # fmt: skip
+
+
+def test_player_points_prefer_espns_numbers_and_keep_ours_beside_them():
+    espn = {"applied_avg": 18.0, "applied_total": 180.0,
+            "avg": {"PTS": 20.0, "FGA": 12.0, "REB": 8.0}, "total": {"GP": 10.0}}  # fmt: skip
+    preseason = {"applied_avg": 0, "applied_total": 0, "avg": {"PTS": 10.0, "FGA": 8.0}}
+    player = make_player(7, {f"{SEASON}_total": espn, f"{SEASON}_projected": preseason})
+    df = transform_player_points([player, player], SCORING, LEAGUE, SEASON, AT)
+    rows = df.set_index("stat_window")
+    assert len(df) == 2  # a repeated player isn't loaded twice
+    assert rows.at["season", "fp_per_game"] == 18.0 and rows.at["season", "source"] == "espn"
+    assert rows.at["season", "computed_per_game"] == 16.0 and rows.at["season", "games"] == 10
+    # ESPN sent 0: our stat x points is used instead.
+    assert rows.at["projected", "fp_per_game"] == 2.0
+    assert rows.at["projected", "source"] == "computed"
+    off = points_mismatches(df)
+    assert list(off["stat_window"]) == ["season"]  # 18 vs 16: more than 0.1 apart
+
+
+def test_lineup_slots_leave_out_bench_and_ir():
+    raw = {"rosterSettings": {"lineupSlotCounts": {"0": 1, "5": 1, "11": 3, "12": 3, "13": 1,
+                                                   "7": 0}}}  # fmt: skip
+    assert lineup_slots(raw) == {"PG": 1, "G": 1, "UT": 3}
+    assert bench_slots(raw) == 3
+
+
+def test_matchup_scores_keep_both_sides_future_weeks_and_live_points():
+    schedule = [
+        {"matchupPeriodId": 1, "winner": "HOME", "playoffTierType": "NONE",
+         "home": {"teamId": 1, "totalPoints": 510.5}, "away": {"teamId": 2, "totalPoints": 480.0}},
+        {"matchupPeriodId": 2, "winner": "UNDECIDED", "playoffTierType": "NONE",
+         "home": {"teamId": 2, "totalPoints": 0, "totalPointsLive": 120.0},
+         "away": {"teamId": 1, "totalPoints": 0, "totalPointsLive": 99.0}},
+        {"matchupPeriodId": 3, "winner": "UNDECIDED", "playoffTierType": "WINNERS_BRACKET",
+         "home": {"teamId": 1, "totalPoints": 0}, "away": {"teamId": 2, "totalPoints": 0}},
+        {"matchupPeriodId": 3, "home": {"teamId": 3}},  # a bye
+    ]  # fmt: skip
+    df = transform_matchup_scores(schedule, 2, LEAGUE, SEASON, AT)
+    assert len(df) == 6
+    week2 = df.loc[(df["matchup_period"] == 2) & (df["team_id"] == 1)].iloc[0]
+    assert (week2["points"], week2["opponent_points"], week2["is_home"]) == (99.0, 120.0, False)
+    assert df.loc[df["matchup_period"] == 3, "is_playoff"].all()
+    assert not df.loc[df["matchup_period"] == 1, "is_playoff"].any()
+
+
+def test_pro_schedule_maps_days_to_matchup_weeks():
+    def at(day, hour=0):  # ESPN dates are tip-off times in UTC (7:30 pm ET = 23:30 UTC)
+        return int(dt.datetime(2026, 10, day, hour, 30, tzinfo=dt.UTC).timestamp() * 1000)
+
+    # Opening night Tue Oct 20; Sun Oct 25 ends week 1; Mon Oct 26 starts week 2.
+    pro = {
+        2: {"1": [{"date": at(20, 23)}], "6": [{"date": at(26, 2)}], "7": [{"date": at(26, 23)}]},
+        0: {"1": [{"date": at(20, 23)}]},  # the "free agent" pseudo-team
+    }
+    df = transform_pro_schedule(pro, {"1": [1], "2": [2]}, {}, LEAGUE, SEASON, AT)
+    rows = df.set_index("scoring_period")
+    assert list(rows["pro_team"].unique()) == ["BOS"]
+    # 2 am UTC on Oct 26 is a 10 pm ET Oct 25 tip: still week 1.
+    assert rows.at[6, "game_date"] == dt.date(2026, 10, 25)
+    assert list(rows["matchup_period"]) == [1, 1, 2]
+    # Once ESPN has scored a week, its own days win.
+    exact = transform_pro_schedule(pro, {"1": [1], "2": [2]}, {2: ["6", "7"]}, LEAGUE, SEASON, AT)
+    assert list(exact.set_index("scoring_period")["matchup_period"]) == [1, 2, 2]
+
+
+def test_week_of_counts_monday_weeks_from_opening_night():
+    opening = dt.date(2026, 10, 20)  # a Tuesday
+    assert week_of(opening, opening) == 1
+    assert week_of(dt.date(2026, 10, 25), opening) == 1
+    assert week_of(dt.date(2026, 10, 26), opening) == 2
+
+
+def test_rosters_and_free_agents_carry_team_and_eligible_slots():
+    player = make_player(1, {})
+    player.proTeam, player.eligibleSlots = "LAL", ["PG", "G", "UT", "BE", "IR"]
+    league = SimpleNamespace(teams=[make_team(1, roster=[player])])
+    row = transform_rosters(league, LEAGUE, SEASON, AT).iloc[0]
+    assert (row["pro_team"], row["eligible_slots"]) == ("LAL", "PG,G,UT")
+    assert (
+        transform_free_agents([player], LEAGUE, SEASON, AT).iloc[0]["eligible_slots"] == "PG,G,UT"
+    )

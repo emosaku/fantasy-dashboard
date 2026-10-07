@@ -5,8 +5,9 @@ Sign-in is Streamlit's built-in OpenID Connect login with Google (`st.login`; th
 client id and secret live in secrets.toml under [auth]). Locally, DEV_AUTH_EMAIL
 stands in for it (settings.py; never on Cloud Run).
 
-The league's own rules -- its categories, scoring type, teams, season length -- come
-from its Firestore registry entry, which ingest rewrites on every run. Membership
+The league's own rules -- its format (categories or points, locked for the season),
+its categories or point values, teams, season length -- come from its Firestore
+registry entry, which ingest rewrites on every run. Membership
 decides what you can open: only leagues you've registered or joined.
 """
 
@@ -109,6 +110,13 @@ class Context:
     current_week: int
     last_week: int
     doc: dict
+    format: str = "categories"  # "categories" | "points"
+    scoring: tuple = ()  # points leagues: ({stat, points}, ...) in ESPN's order
+    lineup_slots: tuple = ()  # points leagues: ((slot, count), ...) starting slots
+
+    @property
+    def is_points(self) -> bool:
+        return self.format == "points"
 
     @property
     def each_category(self) -> bool:
@@ -120,6 +128,8 @@ class Context:
 
     @property
     def scoring_label(self) -> str:
+        if self.is_points:
+            return "Points"
         return "Each Category" if self.each_category else "Most Categories"
 
 
@@ -151,9 +161,17 @@ def selected_league_id() -> int | None:
     return chosen
 
 
+def league_format(doc: dict | None) -> str:
+    """The league's locked format; leagues from before the lock are categories."""
+    return (doc or {}).get("format") or "categories"
+
+
 def build_context(league_id: int) -> Context | None:
     doc = league_doc(league_id)
-    if not doc or not doc.get("last_ingested_at") or not doc.get("categories"):
+    if not doc or not doc.get("last_ingested_at"):
+        return None
+    fmt = league_format(doc)
+    if not doc.get("scoring" if fmt == "points" else "categories"):
         return None
     member = next((m for m in my_memberships() if m["league_id"] == league_id), {})
     teams = pd.Series(
@@ -174,6 +192,9 @@ def build_context(league_id: int) -> Context | None:
             doc.get("reg_season_matchup_periods") or doc.get("current_matchup_period") or 1
         ),
         doc=doc,
+        format=fmt,
+        scoring=tuple(doc.get("scoring") or ()),
+        lineup_slots=tuple((doc.get("lineup_slots") or {}).items()),
     )
 
 
@@ -205,6 +226,13 @@ def current() -> Context:
         )
         st.warning(
             f"This league's data isn't refreshing: its ESPN login expired or was removed. {who}"
+        )
+    if ctx.doc.get("format_mismatch"):
+        st.warning(
+            f"ESPN now says this league plays {ctx.doc['format_mismatch']}, but League Lab "
+            f"runs its {ctx.format} tools for the {ctx.season - 1}-{str(ctx.season)[2:]} "
+            "season, as confirmed at sign-up. Its data isn't refreshing until the site owner "
+            "reloads it in the right format."
         )
     if tenancy.record_view(db(), ctx.doc, now()):
         league_doc.clear()

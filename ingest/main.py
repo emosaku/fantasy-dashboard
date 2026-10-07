@@ -8,6 +8,13 @@ what changed -- the still-open matchup weeks, activity newer than it already has
 games-played history for players it hasn't seen -- and replaces that league's rows.
 Then one refresh of the precomputed m_* tables covers all of the task's leagues.
 
+A league is loaded in its locked format (categories or points; see catalog.py):
+the format is confirmed at sign-up and fixed for the season. If ESPN's scoring type
+stops matching it, the league is flagged (format_mismatch) and not refreshed until
+the site owner reloads it in the right format (scripts/set_format.py). A points
+league also loads its point values, every player's fantasy points, the season's
+weekly scores and the NBA schedule.
+
 A league that fails (made private, deleted, unsupported) is marked with the reason
 in the registry; the others carry on. The run fails -- triggering the alert -- only
 when every league it tried failed. Leagues marked "deleting" are purged: all their
@@ -28,7 +35,14 @@ from google.cloud import bigquery
 
 from ingest import registry
 from ingest.bigquery_load import in_list, league_scope, replace_rows
-from ingest.catalog import league_categories, scoring_type
+from ingest.catalog import (
+    PLAYER_STATS,
+    POINTS,
+    league_categories,
+    league_format,
+    league_scoring,
+    scoring_type,
+)
 from ingest.credentials import EXPIRED, NeedsLogin, cookies_for
 from ingest.espn_client import (
     LeagueNotAccessible,
@@ -37,17 +51,25 @@ from ingest.espn_client import (
     fetch_player_history,
     fetch_player_info,
     fetch_settings,
+    fetch_views,
     polite,
 )
 from ingest.materialize import MATERIALIZED_VIEWS, refresh_statements, table_for
 from ingest.transform import (
+    bench_slots,
+    lineup_slots,
+    points_mismatches,
     transform_free_agents,
     transform_league_categories,
+    transform_league_scoring,
     transform_league_settings,
     transform_matchup_categories,
+    transform_matchup_scores,
     transform_player_details,
+    transform_player_points,
     transform_player_seasons,
     transform_player_stats,
+    transform_pro_schedule,
     transform_rosters,
     transform_teams,
     transform_transactions,
@@ -55,8 +77,19 @@ from ingest.transform import (
 
 LEAGUE_TABLES = [
     "league_settings", "league_categories", "teams", "matchup_categories", "rosters",
-    "free_agents", "player_stats", "transactions", "player_details",
+    "free_agents", "player_stats", "transactions", "player_details", "league_scoring",
+    "player_points", "matchup_scores", "pro_schedule",
 ]  # fmt: skip
+
+
+class FormatMismatch(Exception):
+    """ESPN's scoring type no longer matches the league's locked format."""
+
+    def __init__(self, espn_format: str):
+        super().__init__(f"ESPN now scores this league by {espn_format}.")
+        self.espn_format = espn_format
+
+
 STAGGER_SECONDS = (2.0, 8.0)
 
 
@@ -101,7 +134,13 @@ def ingest_league(league_doc: dict, client, db, cfg: Config, now: dt.datetime) -
         if cookies and "no basketball league" not in str(error):
             raise NeedsLogin(EXPIRED) from None
         raise
-    categories = league_categories(raw["scoringSettings"])
+    espn_format = league_format(raw["scoringSettings"])
+    locked = league_doc.get("format")
+    if locked and locked != espn_format:
+        raise FormatMismatch(espn_format)
+    points = (locked or espn_format) == POINTS
+    categories = [] if points else league_categories(raw["scoringSettings"])
+    scoring = league_scoring(raw["scoringSettings"]) if points else []
     league = build_league(league_id, season, cookies)
     current = league.currentMatchupPeriod
     # Weeks before the previous one are final; re-fetch only the last two.
@@ -133,17 +172,49 @@ def ingest_league(league_doc: dict, client, db, cfg: Config, now: dt.datetime) -
 
     settings = transform_league_settings(league, raw, league_id, season, now)
     load("league_settings", settings)
-    load("league_categories", transform_league_categories(categories, league_id, season, now))
     teams = transform_teams(league, league_id, season, now)
     load("teams", teams)
-    load(
-        "matchup_categories",
-        transform_matchup_categories(league, periods, league_id, season, now),
-        f"season = {season} AND {in_list('matchup_period', periods)}",
-    )
+    stats = PLAYER_STATS
+    points_check = None
+    if points:
+        load("league_scoring", transform_league_scoring(scoring, league_id, season, now))
+        schedule = fetch_views(league_id, season, ["mMatchupScore"], cookies).get("schedule", [])
+        load(
+            "matchup_scores",
+            transform_matchup_scores(schedule, current, league_id, season, now),
+        )
+        load(
+            "pro_schedule",
+            transform_pro_schedule(
+                league.pro_schedule,
+                raw.get("scheduleSettings", {}).get("matchupPeriods", {}),
+                getattr(league, "matchup_ids", {}),
+                league_id, season, now,
+            ),
+        )  # fmt: skip
+        player_points = transform_player_points(
+            rostered + free_agents, scoring, league_id, season, now
+        )
+        load("player_points", player_points)
+        off = points_mismatches(player_points)
+        points_check = {"checked": int((player_points["source"] == "espn").sum()),
+                        "mismatched": int(len(off))}  # fmt: skip
+        if len(off):
+            print(f"league {league_id}: {len(off)} player windows differ from ESPN's points")
+        stats = sorted(set(PLAYER_STATS) | {s["stat"] for s in scoring})
+    else:
+        load("league_categories", transform_league_categories(categories, league_id, season, now))
+        load(
+            "matchup_categories",
+            transform_matchup_categories(league, periods, league_id, season, now),
+            f"season = {season} AND {in_list('matchup_period', periods)}",
+        )
     load("rosters", transform_rosters(league, league_id, season, now))
     load("free_agents", transform_free_agents(free_agents, league_id, season, now))
-    load("player_stats", transform_player_stats(rostered + free_agents, league_id, season, now))
+    load(
+        "player_stats",
+        transform_player_stats(rostered + free_agents, league_id, season, now, stats),
+    )
     load("player_details", transform_player_details(details, league_id, season, now))
     names = {p.playerId: p.name for p in rostered + free_agents} | dict(league.player_map)
     new_txns = transform_transactions(topics, names, league_id, season, now)
@@ -157,11 +228,20 @@ def ingest_league(league_doc: dict, client, db, cfg: Config, now: dt.datetime) -
                 f"{in_list('player_id', ids)} AND history_season = {past_season}",
             )  # fmt: skip
 
-    return {
+    fields = {} if locked else {  # leagues registered before the format lock
+        "format": espn_format, "format_season": season, "format_locked_at": now,
+        "format_confirmed_by": "ingest",
+    }  # fmt: skip
+    return fields | {
         "league_name": raw.get("name"),
         "season": season,
         "scoring_type": scoring_type(raw["scoringSettings"]),
         "categories": categories,
+        "scoring": scoring,
+        "lineup_slots": lineup_slots(raw) if points else {},
+        "bench_slots": bench_slots(raw) if points else 0,
+        "points_check": points_check,
+        "format_mismatch": None,
         "teams": [  # plain Python values: Firestore can't store numpy types
             {"team_id": int(t.team_id), "team_name": str(n), "owner": o}
             for t, n, o in zip(league.teams, teams["team_name"], teams["owner"], strict=True)
@@ -227,6 +307,9 @@ def main(env=os.environ) -> int:
             registry.record_success(db, league_id, fields)
             done.append(league_id)
             print(f"league {league_id}: ok")
+        except FormatMismatch as error:  # waits for the site owner; data kept as it was
+            registry.record_format_mismatch(db, league_id, error.espn_format, now)
+            print(f"league {league_id}: format mismatch ({error})")
         except NeedsLogin as error:  # waits for the commissioner; not a job failure
             registry.record_needs_login(db, league_id, str(error), now)
             print(f"league {league_id}: needs a new ESPN login")

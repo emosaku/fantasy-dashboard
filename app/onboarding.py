@@ -5,15 +5,23 @@ works for a public league; a private one raises NeedsLogin, and the commissioner
 connect it with their ESPN login (two browser cookies, espn_s2 and SWID). With a
 login, the same request must succeed AND the login must belong to someone in the
 league: SWID is the ESPN account id, listed as an owner of their team. The league is
-refused, with a message for the commissioner, if its format isn't head-to-head
-categories or it scores a category League Lab can't compute. Pure Python:
+refused, with a message for the commissioner, if it isn't a head-to-head points or
+categories league, scores a category League Lab can't compute, or changes point
+values by lineup slot. The format it finds is what registering locks for the season. Pure Python:
 unit-tested with stubbed ESPN responses.
 """
 
 import re  # noqa: I001  (settings must come before the ingest imports)
 
 import settings  # noqa: F401  (puts the repo root on the path for the ingest package)
-from ingest.catalog import UnsupportedLeague, league_categories, scoring_type
+from ingest.catalog import (
+    POINTS,
+    UnsupportedLeague,
+    league_categories,
+    league_format,
+    league_scoring,
+    scoring_type,
+)
 from ingest.espn_client import LeagueNotAccessible, fetch_views
 
 PRIVATE = (
@@ -67,7 +75,8 @@ def team_name(team: dict) -> str:
 
 
 def preview(league_id: int, season: int, fetch=fetch_views, cookies: dict | None = None) -> dict:
-    """{league_name, scoring_type, categories, teams, private, my_team} for a league
+    """{league_name, scoring_type, format, categories, scoring, teams, private, my_team}
+    for a league
     League Lab can add; raises CannotRegister (NeedsLogin for a private league without
     a login) otherwise. my_team is the team the login's owner manages (None without a
     login, or for a league member with no team)."""
@@ -81,8 +90,11 @@ def preview(league_id: int, season: int, fetch=fetch_views, cookies: dict | None
             ) from None
         raise (CannotRegister(REFUSED_LOGIN) if cookies else NeedsLogin(PRIVATE)) from None
     raw = data.get("settings") or {}
+    scoring_settings = raw.get("scoringSettings") or {}
     try:
-        categories = league_categories(raw.get("scoringSettings") or {})
+        fmt = league_format(scoring_settings)
+        categories = [] if fmt == POINTS else league_categories(scoring_settings)
+        scoring = league_scoring(scoring_settings) if fmt == POINTS else []
     except UnsupportedLeague as error:
         raise CannotRegister(str(error)) from None
 
@@ -106,7 +118,9 @@ def preview(league_id: int, season: int, fetch=fetch_views, cookies: dict | None
     return {
         "league_name": raw.get("name") or f"League {league_id}",
         "scoring_type": scoring_type(raw["scoringSettings"]),
+        "format": fmt,
         "categories": categories,
+        "scoring": scoring,
         "teams": teams,
         "private": cookies is not None,
         "my_team": my_team,

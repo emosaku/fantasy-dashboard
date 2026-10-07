@@ -1,6 +1,8 @@
 """League Lab's entry point. Multipage app via st.navigation; the feature pages live
-in app/views/. Signed out, only the landing page, the invite page and the privacy
-policy exist. Run locally from the repo root with:
+in app/views/ (categories leagues) and app/views/points/ (points leagues: same page
+names and addresses, Transactions shared). The open league's format picks the set.
+Signed out, only the landing page, the invite page and the privacy policy exist.
+Run locally from the repo root with:
 
     streamlit run app/Home.py
 """
@@ -33,12 +35,13 @@ def landing() -> None:
     st.markdown(
         "- **Power rankings by all-play**: your record if you'd played everyone, every week\n"
         "- **Luck**: who's winning more than their stats say\n"
-        "- **Trade analyzer**: win-win trades and waiver moves for *your* categories\n"
-        "- **Category and player rankings**, **head-to-head compare**, **every transaction**"
+        "- **Trade analyzer**: win-win trades and waiver moves for *your* team\n"
+        "- **Player rankings**, **head-to-head compare**, **every transaction**"
     )
     st.caption(
-        "For head-to-head categories leagues (Most Categories or Each Category), any "
-        "category set. Public or private leagues. Free, no ads."
+        "For head-to-head points leagues and head-to-head categories leagues (Most "
+        "Categories or Each Category, any category set). Public or private leagues. "
+        "Free, no ads."
     )
     if not league.auth_configured() and not settings.DEV_AUTH_EMAIL:
         st.warning("Sign-in isn't set up on this server yet.")
@@ -53,6 +56,15 @@ def landing() -> None:
 
 def home() -> None:
     ctx = league.current()
+    if ctx.is_points:
+        from points import home as points_home
+
+        points_home.render(ctx)
+        st.subheader("Pages")
+        for page, blurb in POINTS_BLURBS:
+            st.page_link(page)
+            st.caption(blurb)
+        return
     st.title(ctx.name)
     st.caption(
         f"{ctx.season} season · {ctx.scoring_label} · {len(ctx.cats)} categories: "
@@ -108,6 +120,38 @@ PAGES = {
         "views/7_Player_Rankings.py", title="Player Rankings", icon=":material/person_search:"
     ),
 }
+POINTS_PAGES = {
+    "compare": st.Page(
+        "views/points/1_Compare.py", title="Compare", icon=":material/compare_arrows:"
+    ),
+    "power": st.Page(
+        "views/points/2_Power_Rankings.py", title="Power Rankings", icon=":material/leaderboard:"
+    ),
+    "luck": st.Page(
+        "views/points/3_Matchups_and_Luck.py", title="Matchups and Luck", icon=":material/casino:"
+    ),
+    "txn": PAGES["txn"],
+    "strength": st.Page(
+        "views/points/5_Roster_Strength.py", title="Roster Strength",
+        icon=":material/fitness_center:",
+    ),
+    "trade": st.Page(
+        "views/points/6_Trade_Analyzer.py", title="Trade Analyzer", icon=":material/handshake:"
+    ),
+    "players": st.Page(
+        "views/points/7_Player_Rankings.py", title="Player Rankings",
+        icon=":material/person_search:",
+    ),
+}  # fmt: skip
+POINTS_BLURBS = [
+    (POINTS_PAGES["compare"], "Two teams' weekly points side by side, or up to four players."),
+    (POINTS_PAGES["power"], "Rankings by all-play points, and each team's projected finish."),
+    (POINTS_PAGES["luck"], "Every week's scores, and who's winning more than their points say."),
+    (POINTS_PAGES["txn"], "Every add, drop, trade and lineup move, filterable."),
+    (POINTS_PAGES["strength"], "Each roster's projected weekly points from a daily lineup."),
+    (POINTS_PAGES["trade"], "Waiver pickups and win-win trades in expected wins a week."),
+    (POINTS_PAGES["players"], "Every player by fantasy points per game, rostered or free agent."),
+]
 PAGE_BLURBS = [
     (PAGES["compare"], "Any two teams, category by category, for a week or the season."),
     (PAGES["power"], "Rankings by all-play: your record if you'd played everyone every week."),
@@ -131,10 +175,16 @@ if user is None:
     ui.footer()
     st.stop()
 
+# The open league's format picks the page set (same names and addresses in both).
+ids = league.open_league_ids()
+analysis_pages = PAGES
+if ids and league.league_format(league.league_doc(league.selected_league_id())) == "points":
+    analysis_pages = POINTS_PAGES
+
 nav = st.navigation(
     {
         "": [st.Page(home, title="Home", icon=":material/home:", default=True)],
-        "Analysis": list(PAGES.values()),
+        "Analysis": list(analysis_pages.values()),
         "Leagues": [
             st.Page("views/league_admin.py", title="League settings", icon=":material/tune:",
                     url_path="league"),
@@ -147,7 +197,6 @@ nav = st.navigation(
 )  # fmt: skip
 
 # Sidebar: which league, who's signed in, and the open league's data freshness.
-ids = league.open_league_ids()
 if ids:
     league.selected_league_id()  # makes sure session_state["league_id"] is one of ids
     if len(ids) > 1:

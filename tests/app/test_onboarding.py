@@ -59,9 +59,41 @@ def test_wrong_id_is_refused():
         onboarding.preview(1, 2026, refuse(msg))
 
 
-def test_points_league_is_refused():
-    with pytest.raises(onboarding.CannotRegister, match="head-to-head categories"):
-        onboarding.preview(1, 2026, espn("H2H_POINTS"))
+# ESPN's default points scoring: 0 PTS, 13 FGM, 14 FGA, 6 REB, 11 TO, 37 DD (a bonus).
+POINT_ITEMS = [
+    {"statId": 0, "points": 1.0},
+    {"statId": 13, "points": 2.0},
+    {"statId": 14, "points": -1.0},
+    {"statId": 6, "points": 1.0},
+    {"statId": 11, "points": -2.0, "pointsOverrides": {}},
+    {"statId": 37, "points": 5.0},
+    {"statId": 20, "points": 0.0},  # FT%, worth nothing: left out
+]
+
+
+def test_points_league_previews_with_its_point_values():
+    out = onboarding.preview(1, 2026, espn("H2H_POINTS", POINT_ITEMS))
+    assert out["format"] == "points"
+    assert out["categories"] == []
+    assert [(s["stat"], s["points"]) for s in out["scoring"]] == [
+        ("PTS", 1.0), ("FGM", 2.0), ("FGA", -1.0), ("REB", 1.0), ("TO", -2.0), ("DD", 5.0),
+    ]  # fmt: skip
+
+
+def test_categories_league_previews_as_categories():
+    assert onboarding.preview(1, 2026, espn())["format"] == "categories"
+
+
+def test_points_that_change_by_lineup_slot_are_refused():
+    items = [{"statId": 0, "points": 1.0, "pointsOverrides": {"11": 0.5}}]
+    with pytest.raises(onboarding.CannotRegister, match="lineup slot"):
+        onboarding.preview(1, 2026, espn("H2H_POINTS", items))
+
+
+@pytest.mark.parametrize("scoring_type", ["ROTISSERIE", "TOTAL_POINTS", None])
+def test_other_formats_are_refused(scoring_type):
+    with pytest.raises(onboarding.CannotRegister, match="head-to-head"):
+        onboarding.preview(1, 2026, espn(scoring_type))
 
 
 def test_unsupported_category_is_named():

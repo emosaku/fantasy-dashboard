@@ -85,3 +85,21 @@ def roster_strength(league_id: int, version: str) -> pd.DataFrame:
 def teams(league_id: int, version: str) -> pd.DataFrame:
     """Each team's name, manager and real record (a raw table, one row per team)."""
     return _read("teams", league_id, version)
+
+
+# --- Points leagues: raw tables, clustered by league_id, read whole for one league -----
+
+
+def player_points(league_id: int, version: str) -> pd.DataFrame:
+    """Each pool player's fantasy points per stat window."""
+    return _read("player_points", league_id, version)
+
+
+def matchup_scores(league_id: int, version: str) -> pd.DataFrame:
+    """Every matchup of the season, played or not, one row per side."""
+    return _read("matchup_scores", league_id, version)
+
+
+def pro_schedule(league_id: int, version: str) -> pd.DataFrame:
+    """The NBA schedule mapped to the league's matchup weeks."""
+    return _read("pro_schedule", league_id, version)

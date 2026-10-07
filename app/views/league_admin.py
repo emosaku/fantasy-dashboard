@@ -18,6 +18,11 @@ ctx = league.current()
 db = league.db()
 user = league.current_user()
 st.subheader(ctx.name)
+locked_for = ctx.doc.get("format_season") or ctx.season
+st.caption(
+    f"Format: head-to-head {'points' if ctx.is_points else 'categories'}, locked for the "
+    f"{locked_for - 1}-{str(locked_for)[2:]} season. Only the site owner can change it."
+)
 
 # --- Your team ---------------------------------------------------------------------
 team_options = [None, *ctx.team_names.index]

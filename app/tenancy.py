@@ -9,6 +9,9 @@ Rules:
     who registers it is its commissioner.
   * Others join only through the league's invite link, and claim a team. A team has
     one member; the commissioner can remove members and rotate the invite link.
+  * Registering locks the league's format (categories or points) for the season it's
+    registered in; every page uses it. Only the site owner can change it
+    (scripts/set_format.py).
   * The commissioner can delete the league: it's marked "deleting" and the ingest
     job removes every row, registry entry and stored credential.
   * A league's data can be refreshed on demand at most once an hour.
@@ -137,9 +140,11 @@ def register(
     max_leagues: int,
     max_per_user: int,
     credentials: str = "public",
+    league_format: str = "categories",
 ) -> dict:
-    """Add a league with `user` as commissioner. Returns the league doc.
-    credentials: "public", or "secret:<name>" for a private league's saved login."""
+    """Add a league with `user` as commissioner, its format locked for `season`.
+    Returns the league doc. credentials: "public", or "secret:<name>" for a private
+    league's saved login."""
     check_can_register(db, league_id, user, max_leagues, max_per_user)
 
     league = {
@@ -152,6 +157,10 @@ def register(
         "created_at": now,
         "last_viewed_at": now,
         "internal_test": False,
+        "format": league_format,
+        "format_season": int(season),
+        "format_locked_at": now,
+        "format_confirmed_by": user["uid"],
     }
     _league_ref(db, league_id).set(league)
     _add_member(db, league_id, user, team_id, "commissioner", now)
