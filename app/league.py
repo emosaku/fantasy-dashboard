@@ -60,7 +60,9 @@ def current_user() -> dict | None:
 
 
 def sign_in() -> None:
-    st.login("google")
+    # No provider name: Streamlit then reads client_id etc. straight from [auth]
+    # (st.login("google") would look for an [auth.google] section instead).
+    st.login()
 
 
 def sign_out() -> None:

@@ -83,7 +83,7 @@ tests). New tests cover turnovers, A/TO, Each Category and unsupported formats.
 
 ## Sign-in and tenancy
 
-- **Sign-in**: Streamlit's built-in OpenID Connect (`st.login("google")`). Its settings
+- **Sign-in**: Streamlit's built-in OpenID Connect with Google (`st.login()`). Its settings
   live in Secret Manager and are mounted as `secrets.toml`. For local work,
   `DEV_AUTH_EMAIL` in `.env` signs you in as that address; it's ignored on Cloud Run.
 - **Rules** (`app/tenancy.py`, tested against an in-memory Firestore):
