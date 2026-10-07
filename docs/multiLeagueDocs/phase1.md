@@ -57,6 +57,8 @@ scoring in seven files. League Lab reads every league's own rules from ESPN:
   objective, the projection and the ▲/▼ arrows.
 - **Scoring type**: Most Categories ranks and projects on matchup records; Each
   Category on category records. Luck compares actual and all-play at the same level.
+  ESPN names Each Category `H2H_CATEGORY`; League Lab stores it as `H2H_EACH_CATEGORY`
+  (`catalog.scoring_type`), so both spellings register.
 
 The original league's nine categories are now just one case (`NINE_CAT_NO_TO` in the
 tests). New tests cover turnovers, A/TO, Each Category and unsupported formats.

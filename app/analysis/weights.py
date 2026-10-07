@@ -81,3 +81,42 @@ def player_values(players: pd.DataFrame, weights: pd.DataFrame) -> pd.Series:
 def generic_values(players: pd.DataFrame) -> pd.Series:
     """Unweighted total z -- the same for every team; used for fairness checks."""
     return players[cat_cols(players)].sum(axis=1)
+
+
+def player_fit(players: pd.DataFrame, player_ids, weights: pd.DataFrame) -> pd.DataFrame:
+    """Compare page's "Fit for your team" row: each player's value to the team
+    `weights` was computed for (v = player_values, the same number the Trade
+    Analyzer shows), next to his generic (unweighted) total z, and how that value
+    splits across the team's tiers in words, e.g. "70% of his value is in your
+    Swing categories" -- two players with similar overall ranks can look very
+    different here. Only categories where the player adds positive weighted value
+    count toward the split; one with none gets an empty breakdown. A player not in
+    `players` (no stat line this window) gets None/empty throughout."""
+    present = [p for p in player_ids if p in players.index]
+    by_id = {}
+    if present:
+        sub = players.loc[present]
+        v = player_values(sub, weights)
+        generic = generic_values(sub)
+        for pid in present:
+            cols = list(weights.index)
+            contribution = sub.loc[pid, cols] * weights.loc[cols, "weight"]
+            positive = contribution[contribution > 0]
+            by_tier = positive.groupby(weights.loc[positive.index, "tier"]).sum()
+            total = by_tier.sum()
+            if total > 0:
+                breakdown = "; ".join(
+                    f"{100 * amount / total:.0f}% of his value is in your {tier} categories"
+                    for tier, amount in by_tier.sort_values(ascending=False).items()
+                )
+            else:
+                breakdown = "no positive value in any category for this team"
+            by_id[pid] = {"value": v[pid], "generic": generic[pid], "tier_breakdown": breakdown}
+    out = pd.DataFrame(
+        [
+            by_id.get(pid, {"value": None, "generic": None, "tier_breakdown": ""})
+            for pid in player_ids
+        ],
+        index=pd.Index(list(player_ids), name="player_id"),
+    )
+    return out

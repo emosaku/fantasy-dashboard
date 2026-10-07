@@ -11,7 +11,7 @@ The Trade Analyzer answers one question: **which moves win your team more catego
 | **Team profile** | Where you stand in each category, and which ones to protect, chase or give up |
 | **Waiver wire** | The best "add this free agent, drop that player" moves |
 | **Trade finder** | Every 1-for-1 and 2-for-1 deal with every team that helps both sides |
-| **Create a trade** *(new)* | Pick a player you want; get the best offers to land him |
+| **Create a trade** *(new)* | Pick a player you want, or a trade block you'd move (Offer Builder); get the best offers |
 | **Mock trade** *(updated)* | Try any deal, plus your own adds and drops around it, and see the result step by step |
 
 Three controls at the top shape everything below them:
@@ -78,6 +78,30 @@ Each offer card shows the players, both teams' change in category wins, the valu
 **Deal sizes** filters the list. Two-player returns (1-for-2 and 2-for-2) often top the list because the *second* player adds value too. Choose 1-for-1 to see what the player alone would cost.
 
 > **Example (real data).** Target Stephen Curry, 1-for-1 only. *Shai Gilgeous-Alexander for Curry* is **likely to work**: you +2, them +6, you give 2.8 more value. *Jalen Williams for Curry* would win you +11, but you'd get 5.2 more value than you give, so they'd likely say no.
+
+### Offer Builder *(new, top of the Create a trade tab)*
+
+The other way round: "I'll move these guys; what's the best I can get, and from whom?"
+
+- **Trade block:** up to 6 of your players. A note flags anyone whose value sits mostly
+  in your Lock or Punt categories; they cost you the least to deal.
+- **Target team** or **Any team**, **max players you give / get** (1-3 each), and an
+  **acceptance level**: *Win-win* (they don't lose category wins, not lopsided), *Close
+  call* (costs them at most 2, not lopsided) or *Max gain* (no limit; lopsided deals
+  flagged). *Advanced*: exclude injured players you'd receive; allow uneven deals.
+- **Find offers** searches every deal up to 3-for-3 (refusing any search over 250,000
+  deals before it starts) and returns up to 15, at most 3 per team when searching every
+  team. Uneven deals keep both rosters full, as in the Trade finder.
+- Each row expands into **why it helps you** and **the pitch**: the same numbers from
+  the other manager's side, ready to send ("This helps you in AST, 3PM: you'd pass 2
+  teams in AST, 1 in 3PM. You'd give up 1 team in BLK."). Categories are your league's
+  own, and in a lower-is-better category like turnovers, passing a team means having
+  fewer.
+- No offers? Buttons try the next acceptance level or show your top targets.
+
+Every recommendation on this page (Waiver wire, Trade finder, Create a trade, Offer
+Builder) has **Load into mock trade** and **Compare players**, which opens the Compare
+page's Players mode with everyone in the deal (up to 4).
 
 ## Mock trade *(updated)*
 

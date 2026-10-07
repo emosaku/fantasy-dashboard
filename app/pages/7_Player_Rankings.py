@@ -119,7 +119,7 @@ formats = (
     else ({c: "{:+.2f}" for c in COLUMNS} if show == "z" else {})
 )
 styled = table.style.apply(shade, axis=0).format(formats, na_rep="–")
-st.dataframe(
+event = st.dataframe(
     styled,
     hide_index=True,
     width="stretch",
@@ -128,4 +128,23 @@ st.dataframe(
         "Overall": st.column_config.NumberColumn(width="small", help="Rank by total z-score"),
         "Player": st.column_config.TextColumn(pinned=True),
     },
+    on_select="rerun",
+    selection_mode="multi-row",
+    key="rankings-table",
 )
+
+selected_rows = event.selection["rows"]
+selected_ids = [int(i) for i in shown.index[selected_rows]]
+c1, c2 = st.columns([1, 4])
+if c1.button(
+    "Compare selected",
+    icon=":material/compare_arrows:",
+    disabled=not 2 <= len(selected_ids) <= 4,
+    help="Select 2-4 rows in the table above (the checkbox column on the left)."
+    if not 2 <= len(selected_ids) <= 4
+    else None,
+):
+    st.session_state["compare-players"] = selected_ids
+    st.switch_page("pages/1_Compare.py")
+if selected_ids:
+    c2.caption(f"{len(selected_ids)} selected: {', '.join(shown.loc[selected_ids, 'player_name'])}")

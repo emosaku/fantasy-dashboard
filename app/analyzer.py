@@ -11,8 +11,9 @@ import streamlit as st
 
 import queries
 from analysis.pool import empty_slot_z, player_matrix, team_totals
-from analysis.trades import deals_for_target, find_trades
+from analysis.trades import SearchTooLarge, build_offers, deals_for_target, find_trades
 from analysis.weights import compute_weights
+from analysis.weights import player_fit as _player_fit
 
 STAT_WINDOWS = {
     "blended": "Blended",
@@ -78,3 +79,52 @@ def empty_slot(league_id: int, version: str, window: str) -> pd.Series:
         empty_slot_z(z.loc[z["stat_window"] == w]) for w in raw if (z["stat_window"] == w).any()
     ]
     return pd.concat(found, axis=1).mean(axis=1) if found else pd.Series(dtype=float)
+
+
+@st.cache_data(ttl=6 * 3600, max_entries=200, show_spinner="Searching your trade block...")
+def offers(
+    league_id: int,
+    version: str,
+    window: str,
+    me: int,
+    block: tuple,
+    targets: tuple,
+    delta: float,
+    overrides: tuple,
+    max_give: int,
+    max_get: int,
+    acceptance: str,
+    exclude_injured: bool,
+    allow_uneven: bool,
+) -> tuple[pd.DataFrame | None, str | None]:
+    """Offer Builder's search. (deals, problem) -- problem is SearchTooLarge's
+    message (too many deals to check) when the search was too big to run, else
+    None. Cached by every input, so re-expanding a row never reruns the search."""
+    players, totals = league(league_id, version, window)
+    weights = weights_by_team(league_id, version, window, me, delta, overrides)
+    try:
+        deals = build_offers(
+            players, totals, me, list(block), list(targets), weights,
+            max_give=max_give, max_get=max_get, acceptance=acceptance,
+            exclude_injured=exclude_injured, allow_uneven=allow_uneven,
+        )  # fmt: skip
+        return deals, None
+    except SearchTooLarge as error:
+        return None, str(error)
+
+
+@st.cache_data(ttl=6 * 3600, max_entries=200, show_spinner=False)
+def player_fit(
+    league_id: int,
+    version: str,
+    window: str,
+    team_id: int,
+    player_ids: tuple,
+    delta: float,
+    overrides: tuple,
+) -> pd.DataFrame:
+    """Compare page's Players mode: each player's fit for `team_id`, for the same
+    window/delta/overrides the Trade Analyzer uses -- see analysis.weights.player_fit."""
+    players, totals = league(league_id, version, window)
+    weights = compute_weights(totals, team_id, delta, dict(overrides))
+    return _player_fit(players, list(player_ids), weights)

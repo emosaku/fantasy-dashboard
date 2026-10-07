@@ -1,25 +1,33 @@
 """The Trade & Waiver Analyzer's math (app/analysis/) on the synthetic 4-team league
 in tests/fixtures/four_team_league.py."""
 
+import math
+
 import numpy as np
 import pandas as pd
 import pytest
 
-from analysis.explain import explain
+from analysis.explain import explain, pitch_text
 from analysis.objective import expected_category_wins, matchup_record
 from analysis.pool import empty_slot_z, team_totals
 from analysis.trades import (
+    CLOSE_CALL,
     LIKELY,
+    MAX_GAIN,
     STATUS_ORDER,
     THEY_SAY_NO,
+    WIN_WIN,
+    SearchTooLarge,
     apply_trade,
     as_ids,
+    build_offers,
     deals_for_target,
     find_trades,
+    offer_search_size,
     simulate_trade,
 )
 from analysis.waivers import rank_pickups, rank_waiver_moves
-from analysis.weights import compute_weights, punts
+from analysis.weights import compute_weights, player_fit, player_values, punts
 from tests.fixtures.four_team_league import COLUMNS, build_players
 
 
@@ -184,6 +192,24 @@ def test_explanation_counts_gains_and_losses():
     assert explain({}) == "No change in category wins."
 
 
+def test_pitch_leads_with_what_helps_them_and_says_what_they_give_up():
+    text = pitch_text(pd.Series({"AST": 2.0, "3PM": 1.0, "BLK": -1.0}))
+    assert text == (
+        "This helps you in AST, 3PM: you'd pass 2 teams in AST, 1 in 3PM. "
+        "You'd give up 1 team in BLK."
+    )
+
+
+def test_pitch_says_you_lose_nothing_when_there_is_no_cost():
+    text = pitch_text(pd.Series({"AST": 2.0}))
+    assert text == "This helps you in AST: you'd pass 2 teams in AST. You lose nothing."
+
+
+def test_pitch_is_honest_when_the_deal_only_costs_them():
+    assert pitch_text(pd.Series({"BLK": -3.0})) == "This costs you category wins: 3 teams in BLK."
+    assert pitch_text({}) == "This doesn't change your category wins either way."
+
+
 # --- Several adds and drops around a mock trade --------------------------------------
 
 
@@ -344,3 +370,165 @@ def test_trade_finder_is_unchanged_by_the_shared_code(players, totals):
     deals = find_trades(players, totals, 2, all_weights(totals), top=1000)
     assert not deals.empty
     assert ((deals["dE_me"] > 0) & (deals["dE_them"] >= 0)).all()
+
+
+# --- Offer Builder: deals built from a chosen trade block --------------------------
+
+
+@pytest.fixture
+def weights(totals):
+    return all_weights(totals)
+
+
+def test_every_deal_only_gives_players_from_the_block(players, totals, weights):
+    block = [30, 31]
+    offers = build_offers(players, totals, 3, block, [1, 2, 4], weights)
+    assert not offers.empty
+    for row in offers.itertuples():
+        assert set(row.give_ids) <= set(block)
+        assert all(players.at[p, "team_id"] == row.partner_id for p in row.get_ids)
+
+
+def test_every_offer_raises_my_category_wins(players, totals, weights):
+    offers = build_offers(players, totals, 3, [30, 31, 32], [1, 2, 4], weights,
+                          acceptance=MAX_GAIN)  # fmt: skip
+    assert not offers.empty
+    assert (offers["dE_me"] > 0).all()
+
+
+def test_win_win_and_close_call_floors(players, totals, weights):
+    win_win = build_offers(players, totals, 3, [30, 31, 32], [1, 2, 4], weights,
+                           acceptance=WIN_WIN)  # fmt: skip
+    close_call = build_offers(players, totals, 3, [30, 31, 32], [1, 2, 4], weights,
+                              acceptance=CLOSE_CALL)  # fmt: skip
+    assert not win_win.empty
+    assert (win_win["dE_them"] >= 0).all()
+    assert not win_win["lopsided"].any()
+    assert (close_call["dE_them"] >= -2 - 1e-9).all()
+    assert not close_call["lopsided"].any()
+    # win_win is a subset of what close_call allows: never fewer deals for a wider net
+    assert len(close_call) >= len(win_win)
+
+
+def test_max_gain_can_include_lopsided_deals_close_call_cannot(players, totals, weights):
+    max_gain = build_offers(players, totals, 3, [30, 31, 32], [1, 2, 4], weights,
+                            acceptance=MAX_GAIN)  # fmt: skip
+    close_call = build_offers(players, totals, 3, [30, 31, 32], [1, 2, 4], weights,
+                              acceptance=CLOSE_CALL)  # fmt: skip
+    assert max_gain["lopsided"].any()
+    assert not close_call["lopsided"].any()
+
+
+def test_rosters_stay_full_on_both_sides_for_uneven_deals(players, totals, weights):
+    offers = build_offers(players, totals, 3, [30, 31, 32], [1, 2, 4], weights,
+                          max_give=3, max_get=1, acceptance=MAX_GAIN)  # fmt: skip
+    uneven = offers.loc[offers["give_ids"].map(len) != offers["get_ids"].map(len)]
+    assert not uneven.empty
+    my_roster = set(players.index[(players["team_id"] == 3) & ~players["is_ir"]])
+    for row in uneven.itertuples():
+        them_roster = set(players.index[(players["team_id"] == row.partner_id) & ~players["is_ir"]])
+        after_mine = (my_roster - set(row.give_ids)) | set(row.get_ids)
+        after_mine = (after_mine - set(as_ids(row.my_drop_id))) | set(as_ids(row.my_add_id))
+        after_theirs = (them_roster - set(row.get_ids)) | set(row.give_ids)
+        after_theirs = (after_theirs - set(as_ids(row.their_drop_id))) | set(
+            as_ids(row.their_add_id)
+        )
+        assert len(after_mine) == len(my_roster)
+        assert len(after_theirs) == len(them_roster)
+        # never dropped a player just traded away, never added one already in the deal
+        assert not (set(as_ids(row.my_drop_id)) & set(row.give_ids))
+        assert not (set(as_ids(row.their_drop_id)) & set(row.get_ids))
+
+
+def test_offer_matches_simulate_trade(players, totals, weights):
+    offers = build_offers(players, totals, 3, [30, 31, 32], [1, 2, 4], weights,
+                          max_give=3, max_get=2, acceptance=MAX_GAIN)  # fmt: skip
+    assert not offers.empty
+    for row in offers.itertuples():
+        them = int(row.partner_id)
+        _, mine, theirs = simulate_trade(
+            players,
+            totals,
+            3,
+            them,
+            list(row.give_ids),
+            list(row.get_ids),
+            list(row.my_drop_id) or None,
+            list(row.their_drop_id) or None,
+            list(row.my_add_id) or None,
+            list(row.their_add_id) or None,
+            punts(weights[3]),
+            punts(weights[them]),
+        )
+        assert mine.delta_e == pytest.approx(row.dE_me)
+        assert theirs.delta_e == pytest.approx(row.dE_them)
+
+
+def test_allow_uneven_off_keeps_give_and_get_sizes_equal(players, totals, weights):
+    offers = build_offers(players, totals, 3, [30, 31, 32], [1, 2, 4], weights,
+                          max_give=3, max_get=3, allow_uneven=False,
+                          acceptance=MAX_GAIN)  # fmt: skip
+    assert not offers.empty
+    assert (offers["give_ids"].map(len) == offers["get_ids"].map(len)).all()
+
+
+def test_any_team_caps_at_three_offers_per_partner(players, totals, weights):
+    offers = build_offers(players, totals, 3, [30, 31, 32], [1, 2, 4], weights,
+                          max_give=2, max_get=2, acceptance=MAX_GAIN)  # fmt: skip
+    assert not offers.empty
+    assert (offers.groupby("partner_id").size() <= 3).all()
+
+
+def test_the_search_size_guard_trips_before_building_anything(players, totals, weights):
+    with pytest.raises(SearchTooLarge, match=r"That search would check \d"):
+        build_offers(players, totals, 3, [30, 31, 32], [1, 2, 4], weights,
+                     max_give=3, max_get=3, max_search=1)  # fmt: skip
+
+
+def test_offer_search_size_matches_the_actual_enumeration(players, totals, weights):
+    """The guard's cheap combinatorics must agree with what MAX_GAIN actually
+    considers (which, unlike win_win/close_call, keeps everything it builds except
+    the dE_me > 0 filter and dedup -- so this checks the count is in the right
+    ballpark, not exact, since dedup and the sign filter remove some)."""
+    size = offer_search_size(3, [4, 4, 4], 2, 2, True)
+    assert size == sum(math.comb(3, g) * math.comb(4, r) for g in (1, 2) for r in (1, 2)) * 3
+
+
+def test_offer_without_a_target_or_block_is_empty(players, totals, weights):
+    assert build_offers(players, totals, 3, [], [1, 2, 4], weights).empty
+    assert build_offers(players, totals, 3, [30], [], weights).empty
+
+
+def test_ir_and_out_players_are_never_offered(players, totals, weights):
+    # 41 (IR) is passed IN the block on purpose: build_offers must drop it quietly.
+    offers = build_offers(players, totals, 4, [41, 42, 43], [1, 2, 3], weights, acceptance=MAX_GAIN)
+    all_ids = {i for row in offers.itertuples() for i in (*row.give_ids, *row.get_ids)}
+    assert 41 not in all_ids
+    assert 102 not in all_ids  # OUT free agent, excluded from any add
+
+
+# --- Compare page: player_fit --------------------------------------------------------
+
+
+def test_player_fit_matches_the_trade_analyzers_own_value(players, totals, weights):
+    w = weights[3]
+    ids = [30, 31]
+    fit = player_fit(players, ids, w)
+    expected = player_values(players.loc[ids], w)
+    assert fit.loc[30, "value"] == pytest.approx(expected[30])
+    assert fit.loc[31, "value"] == pytest.approx(expected[31])
+
+
+def test_player_fit_breakdown_sums_to_a_hundred_percent(players, totals, weights):
+    fit = player_fit(players, [30, 31, 32], weights[3])
+    for pid, row in fit.iterrows():
+        if row["tier_breakdown"] and "no positive value" not in row["tier_breakdown"]:
+            pcts = [int(part.split("%")[0]) for part in row["tier_breakdown"].split("; ")]
+            assert sum(pcts) in (99, 100, 101)  # rounding
+
+
+def test_player_fit_handles_a_player_not_in_the_pool(players, totals, weights):
+    fit = player_fit(players, [30, 999999], weights[3])
+    assert pd.isna(fit.loc[999999, "value"])
+    assert fit.loc[999999, "tier_breakdown"] == ""
+    assert not pd.isna(fit.loc[30, "value"])
