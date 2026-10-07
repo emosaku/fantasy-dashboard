@@ -1,6 +1,6 @@
 # Trade Analyzer: how it works
 
-*Last updated October 6, 2026.*
+*Last updated October 7, 2026.*
 
 ## Overview
 
@@ -11,8 +11,8 @@ The Trade Analyzer answers one question: **which moves win your team more catego
 | **Team profile** | Where you stand in each category, and which ones to protect, chase or give up |
 | **Waiver wire** | The best "add this free agent, drop that player" moves |
 | **Trade finder** | Every 1-for-1 and 2-for-1 deal with every team that helps both sides |
-| **Create a trade** *(new)* | Pick a player you want, or a trade block you'd move (Offer Builder); get the best offers |
-| **Mock trade** *(updated)* | Try any deal, plus your own adds and drops around it, and see the result step by step |
+| **Create a trade** | Pick a player you want, or a trade block you'd move (Offer Builder); get the best offers. *New:* three-team deals |
+| **Mock trade** | Try any deal, plus your own adds and drops around it, and see the result step by step. *New:* three-team deals |
 
 Three controls at the top shape everything below them:
 
@@ -97,8 +97,45 @@ The other way round: "I'll move these guys; what's the best I can get, and from 
   teams in AST, 1 in 3PM. You'd give up 1 team in BLK.").
 - No offers? Buttons try the next acceptance level or show your top targets.
 
+### Three-team deals *(new, bottom of the Create a trade tab)*
+
+When the player you want sits on a team that wants nothing you have, a third team can
+make it work. Three packages move around a circle: **you send to one partner, that
+partner sends to the other, and the other sends to you.** Each team gives one package and
+gets one, and each is scored by its own needs and punts. A deal is listed only if all
+three pass.
+
+- **Mode:** *Unlock a player* (pick the player you want; his team sends him, alone or
+  with one teammate, and you pick the third team or leave it on *Any team*) or *From my
+  trade block* (up to 6 of your players; *Partners* left empty means any two teams, or
+  name one or two).
+- **Players per package** (1 or 2) and the same **acceptance levels** as Offer Builder,
+  applied to both partners. *Advanced*: skip injured teammates you'd receive (Unlock),
+  or how many of each partner's most movable players to try, 4 to 8 (trade block).
+- **Find three-team deals** returns up to 10, at most 2 from any pair of partners. In
+  Unlock mode a line shows the best two-team deal for the same player, and a three-team
+  deal is listed only if it beats it, since two trades are harder to land than one.
+- **Shortcut:** when *Search by player* finds fewer than 3 deals likely to work, a **Try
+  a three-team deal** button runs this search for him.
+
+Each deal card shows your gain and whether all three teams gain, then one row per team:
+what it sends, what it gets, its change in category wins and why. A partner whose side
+looks lopsided is flagged.
+
+- **How to do it on ESPN.** ESPN only trades between two teams, so a three-team deal runs
+  as two trades through a *middle team*, which makes both. Any of the three can be the
+  middle, and all three ways end with the same rosters. The card recommends the one where
+  the middle team is least exposed if trade 2 never happens ("If trade 2 falls through,
+  Team B is at +4 category wins"), and notes when the middle team needs an open roster
+  spot, a trade looks lopsided on its own (a veto risk), or two review periods back to
+  back would run past the trade deadline.
+- **Pitches:** one for each partner, written from their side, plus **one message for
+  the group** covering the whole circle and the order to run the trades. Each has a copy
+  button.
+- **Load into mock trade** and **Compare players** (the first 4 players).
+
 Every recommendation on this page (Waiver wire, Trade finder, Create a trade, Offer
-Builder) has **Load into mock trade** and **Compare players**, which opens the Compare
+Builder, three-team deals) has **Load into mock trade** and **Compare players**, which opens the Compare
 page's Players mode with everyone in the deal (up to 4).
 
 ## Mock trade *(updated)*
@@ -126,10 +163,14 @@ Try any deal by hand. Pick a partner, then **You send** and **You get**. Choose 
 
 Below that, as before: every player in the deal with health and games-played history, each team's category ranks before and after, and per-game totals before and after.
 
+**Three-team deals** *(new)*. Set **Teams in the deal** to 3 and pick two partners. Three boxes follow the circle: *You send to Partner 1*, *Partner 1 sends to Partner 2*, *Partner 2 sends to you*. **Reverse direction** sends to Partner 2 first. Partners keep their rosters full automatically (their drops and free-agent adds are listed, not editable); your own adds, drops, roster count and Suggest a pickup work as above. Results come for all three teams (one tab each), with the step-by-step table, the ESPN plan and per-game totals. Load into mock trade on a three-team card fills all of it.
+
 ## Limits and tips
 
 - **It models category wins, not people.** "Likely to work" means the deal helps their categories and looks fair by value. Their roster loyalty, playoff plans or hunches can still say no.
 - **Over-full rosters aren't charged.** If your moves leave you *over* your roster size, the extra players simply add their value, so trim back to an even count before trusting the numbers. The roster count reminds you.
 - **Early season, prefer Blended or Projected.** Last-7 or last-15 stats swing wildly on a few games.
 - **IR players are left out of trades and totals.** They add nothing until they're activated.
+- **Three-team deals need two accepted trades.** The middle team holds players in between; if trade 2 falls through, it keeps the in-between result the card shows.
+- **The trade-block search tries only each partner's most movable players** (6 by default, up to 8), so deals built around a partner's core players aren't found there. Unlock mode tries every player on the third team.
 - **Use the tabs together:** Team profile to see what you need, Create a trade or Trade finder to find a deal, then Mock trade to fine-tune it with adds and drops.

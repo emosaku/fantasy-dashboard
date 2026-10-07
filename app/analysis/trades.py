@@ -68,6 +68,25 @@ def best_pickup(players: pd.DataFrame, weights: pd.DataFrame):
     return player_values(pool, weights).idxmax()
 
 
+def fill_roster(players: pd.DataFrame, team_id: int, sent, received, weights) -> tuple:
+    """(drops, adds) that keep a team's roster full after it sends `sent` and gets
+    `received`: with more coming in, it drops its lowest-valued remaining players
+    (never one it just received); left short, it picks up the best free agents not
+    OUT. Values by the team's own weights; ties keep roster order."""
+    diff = len(received) - len(sent)
+    if diff > 0:
+        left = players.loc[
+            (players["team_id"] == team_id) & ~players["is_ir"] & ~players.index.isin(list(sent))
+        ]
+        order = player_values(left, weights).sort_values(kind="stable")
+        return tuple(int(p) for p in order.index[:diff]), ()
+    if diff < 0:
+        pool = players.loc[players["is_free_agent"] & (players["injury_status"] != "OUT")]
+        order = player_values(pool, weights).sort_values(ascending=False, kind="stable")
+        return (), tuple(int(p) for p in order.index[:-diff])
+    return (), ()
+
+
 def apply_trade(
     players: pd.DataFrame,
     totals: pd.DataFrame,

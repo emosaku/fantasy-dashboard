@@ -379,6 +379,21 @@ by a model:
 - **Offer Builder's pitch:** the *partner's* per-category change, phrased for them to
   read: "This helps you in AST, 3PM: you'd pass 2 teams in AST, 1 in 3PM. You'd give up
   1 team in BLK."
+- **Three-team deals** use the same ΔE, with three teams' totals changed at once: each
+  team is compared with the teams the deal doesn't touch and with the other two teams'
+  new totals. You must gain; both partners must pass the acceptance level above, and
+  *lopsided* is checked for each partner on what it gives and gets. Ranked by ΔE you,
+  then the weaker partner's ΔE (that manager decides), then fewer players moved; a deal
+  is dropped when a version with one player fewer gains you as much. In Unlock mode a
+  deal must also beat the best two-team deal *Likely to work* for the same player.
+  Rosters stay full by the two-team rule for every team.
+- **The middle team's risk:** ESPN runs a three-team deal as two trades. After trade 1
+  alone (players only, no roster moves) the middle team's ΔE is computed as usual; the
+  plan with the highest one is recommended, since that team is least hurt if trade 2
+  never happens. A trade is flagged *lopsided on its own* by the same 1.5 general-value
+  gap.
+- **The group message** names who gets what, the categories each partner gains (up to
+  three, largest first) or what it costs them, and the recommended order.
 
 ---
 

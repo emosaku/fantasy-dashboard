@@ -128,7 +128,7 @@ Every 1-for-1, 2-for-1 and 1-for-2 deal with every team, keeping only **win-win*
 
 ### Create a trade
 
-Two ways to build a deal.
+Three ways to build a deal.
 
 **Offer Builder:** "I'll move these guys; what's the best I can get?"
 
@@ -141,11 +141,18 @@ Two ways to build a deal.
 - Press **Find offers**. Up to 15 offers come back (at most 3 per team when searching every team) in a table, with your change and theirs, your biggest category gains and losses, and any roster fill-ins. Expand a row for **why it helps you** and **the pitch**: the same numbers written from the other manager's side, ready to send.
 - If nothing qualifies, buttons let you try the next acceptance level or show your top targets.
 
-**Search by player:** type a player on another roster. Every 1-for-1, 2-for-1, 1-for-2 and 2-for-2 deal that brings him over is labelled *Likely to work*, *Costs you* (the realistic price) or *They'd likely say no*, with a deal-size filter.
+**Search by player:** type a player on another roster. Every 1-for-1, 2-for-1, 1-for-2 and 2-for-2 deal that brings him over is labelled *Likely to work*, *Costs you* (the realistic price) or *They'd likely say no*, with a deal-size filter. When fewer than 3 are likely to work, **Try a three-team deal** looks for a third team that makes one work.
+
+**Three-team deals:** three packages move around a circle (you → partner 1 → partner 2 → you), each team scored by its own needs, and a deal is listed only if all three pass.
+
+- *Unlock a player*: his team sends him (alone or with one teammate) to you; you send to a third team, which sends on to his team. Listed only when it beats the best two-team deal for him.
+- *From my trade block*: up to 6 of your players, with any two partners or the one or two you name. Each partner offers its most movable players (6 by default, 4 to 8 in *Advanced*).
+- Players per package (1 or 2) and the same acceptance levels as Offer Builder, applied to both partners. Up to 10 deals, at most 2 per pair of partners.
+- Each card has a row per team (sends, gets, change in category wins, why), **How to do it on ESPN** (two linked trades through a middle team, the recommended order and what the middle team risks if trade 2 falls through, plus review-period and deadline warnings) and **Pitches** for each partner and one group message.
 
 ### Mock trade
 
-Try any deal by hand, or load one from another tab. Pick a partner (or **Free agents** for a pure waiver move), then **You send** and **You get**.
+Try any deal by hand, or load one from another tab. Pick a partner (or **Free agents** for a pure waiver move), then **You send** and **You get**. Set **Teams in the deal** to 3 for a three-team deal: two partners, three boxes around the circle, a **Reverse direction** switch, results for all three teams and the ESPN plan.
 
 - **Your other moves:** add any number of free agents and drop any number of your players around the trade. The partner's own adds and drops are in a collapsed section.
 - **Roster count:** e.g. "12 → 11 players. To stay at 12, add 1 more."

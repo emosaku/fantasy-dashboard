@@ -9,6 +9,13 @@
 -- reg_season_matchup_periods is ESPN's settings.reg_season_count -- the number of
 -- regular-season matchup periods (playoff periods come after it).
 --
+-- trade_deadline and trade_review_hours (ESPN's tradeSettings: deadlineDate and
+-- revisionHours) were added for three-team trades, which run as two ESPN trades back
+-- to back. NULL when the league has none. On an existing table, add them with:
+--   ALTER TABLE `fantasy-dash-emk.fantasy.league_status`
+--     ADD COLUMN IF NOT EXISTS trade_deadline TIMESTAMP,
+--     ADD COLUMN IF NOT EXISTS trade_review_hours INT64;
+--
 -- Natural key for Step 4's MERGE: (season, snapshot_date).
 
 CREATE TABLE IF NOT EXISTS `fantasy-dash-emk.fantasy.league_status` (
@@ -17,6 +24,8 @@ CREATE TABLE IF NOT EXISTS `fantasy-dash-emk.fantasy.league_status` (
   current_matchup_period INT64 NOT NULL,
   reg_season_matchup_periods INT64 NOT NULL,
   playoff_team_count INT64,
+  trade_deadline TIMESTAMP,
+  trade_review_hours INT64,
   ingested_at TIMESTAMP NOT NULL
 )
 PARTITION BY snapshot_date;

@@ -1,6 +1,29 @@
 # Three-team trades: build proposal
 
-*Proposal, October 6, 2026. Branch `3TeamTrade`, cut from `main` at `d4f6098`. No code yet.*
+*Proposal, October 6, 2026. Branch `3TeamTrade`, cut from `main` at `d4f6098`.*
+
+> **Built, October 7, 2026** (phases 1-4 and the code for phase 5; not yet merged to main
+> or deployed). How the build differs from this proposal:
+>
+> - **The search scores every deal exactly** instead of pair scores with a 2-win cushion.
+>   The cushion could miss deals: a team's score against the other two changed teams can
+>   move by more than 2. Each team's new totals are still built once per pair of
+>   packages, and the three-way comparison runs vectorized over the whole grid, which is
+>   fast enough: Unlock about 0.5 s, trade block about 0.4 s (0.8 s with a shortlist of 8)
+>   on the 14-team league. The test "shortcut equals full search" became: the search
+>   scores every deal exactly as simulating it alone does, and returns what checking each
+>   deal one at a time finds.
+> - **The guard counts deals, not pair scores:** 6,000,000 (`MAX_CIRCLE_DEALS`, about 1
+>   s). Every setting the page offers fits on a 14-team league.
+> - **Parity with two-team deals** is tested on the ESPN plan: the middle team's score
+>   after trade 1 equals `simulate_trade` on that trade.
+> - **The ESPN plan's in-between score uses players only**; roster moves are listed for
+>   the finished deal, with a note when the middle team needs an open spot or is short.
+> - **The balancing step** is a shared `fill_roster()` in `trades.py`; Offer Builder's
+>   own vectorized version is unchanged.
+> - **Open questions:** taken as recommended (on request only, the least-risk middle team,
+>   packages of at most 2). The two new `league_status` columns need an `ALTER TABLE` on
+>   the live dataset before the ingest job is deployed (see `sql/ddl/league_status.sql`).
 
 ## Summary
 

@@ -65,6 +65,23 @@ def test_transform_league_status_reads_current_week_and_season_length():
     assert row["current_matchup_period"] == 5
     assert row["reg_season_matchup_periods"] == 16
     assert row["playoff_team_count"] == 8
+    assert pd.isna(row["trade_deadline"])  # no deadline in these settings
+    assert pd.isna(row["trade_review_hours"])
+
+
+def test_transform_league_status_reads_the_trade_deadline_and_review_period():
+    deadline_ms = 1_772_000_000_000
+    league = SimpleNamespace(
+        currentMatchupPeriod=5,
+        settings=SimpleNamespace(
+            reg_season_count=16, trade_deadline=deadline_ms, trade_revision_hours=48
+        ),
+    )
+    row = transform_league_status(
+        league, season=2027, snapshot_date=SNAPSHOT_DATE, ingested_at=INGESTED_AT
+    ).iloc[0]
+    assert row["trade_deadline"] == pd.Timestamp(deadline_ms, unit="ms", tz="UTC")
+    assert row["trade_review_hours"] == 48
 
 
 def test_transform_teams_falls_back_to_username_without_a_name():

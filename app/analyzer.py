@@ -10,6 +10,8 @@ import streamlit as st
 
 import queries
 from analysis.pool import empty_slot_z, player_matrix, team_totals
+from analysis.three_team import three_team_for_target as _for_target
+from analysis.three_team import three_team_offers as _three_team_offers
 from analysis.trades import SearchTooLarge, build_offers, deals_for_target, find_trades
 from analysis.weights import compute_weights
 from analysis.weights import player_fit as _player_fit
@@ -118,3 +120,54 @@ def player_fit(
     players, totals = league(window)
     weights = compute_weights(totals, team_id, delta, dict(overrides))
     return _player_fit(players, list(player_ids), weights)
+
+
+@st.cache_data(ttl=3600, max_entries=100, show_spinner="Searching three-team deals...")
+def three_team_for_target(
+    window: str,
+    me: int,
+    target: int,
+    delta: float,
+    overrides: tuple,
+    third: int | None,
+    max_size: int,
+    acceptance: str,
+    exclude_injured: bool,
+    min_gain: float,
+) -> tuple[pd.DataFrame | None, str | None]:
+    """Three-team deals that unlock one player. (deals, problem), like offers()."""
+    players, totals = league(window)
+    weights = weights_by_team(window, me, delta, overrides)
+    try:
+        deals = _for_target(
+            players, totals, me, target, weights, third=third, max_size=max_size,
+            acceptance=acceptance, exclude_injured=exclude_injured, min_gain=min_gain,
+        )  # fmt: skip
+        return deals, None
+    except SearchTooLarge as error:
+        return None, str(error)
+
+
+@st.cache_data(ttl=3600, max_entries=100, show_spinner="Searching three-team deals...")
+def three_team_offers(
+    window: str,
+    me: int,
+    block: tuple,
+    partners: tuple,
+    delta: float,
+    overrides: tuple,
+    max_size: int,
+    acceptance: str,
+    shortlist: int,
+) -> tuple[pd.DataFrame | None, str | None]:
+    """Three-team deals from my trade block, with any two partners or the named ones."""
+    players, totals = league(window)
+    weights = weights_by_team(window, me, delta, overrides)
+    try:
+        deals = _three_team_offers(
+            players, totals, me, list(block), weights, partners=partners, max_size=max_size,
+            acceptance=acceptance, shortlist=shortlist,
+        )  # fmt: skip
+        return deals, None
+    except SearchTooLarge as error:
+        return None, str(error)

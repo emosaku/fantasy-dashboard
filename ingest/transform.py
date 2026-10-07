@@ -75,12 +75,20 @@ def transform_teams(
     return pd.DataFrame(rows)
 
 
+def trade_deadline(league: League) -> pd.Timestamp | None:
+    """ESPN's trade deadline (epoch milliseconds; 0 when the league has none)."""
+    ms = getattr(league.settings, "trade_deadline", 0) or 0
+    return pd.Timestamp(ms, unit="ms", tz="UTC") if ms else None
+
+
 def transform_league_status(
     league: League, season: int, snapshot_date: dt.date, ingested_at: dt.datetime
 ) -> pd.DataFrame:
     """Where the season stands today: the current matchup period and how many
     regular-season periods there are. v_season_projection splits finished weeks
-    (actual results) from the rest (projected) on these."""
+    (actual results) from the rest (projected) on these. The trade deadline and
+    review period tell the Trade Analyzer whether a three-team deal's two trades can
+    both clear in time."""
     return pd.DataFrame(
         [
             {
@@ -89,6 +97,8 @@ def transform_league_status(
                 "current_matchup_period": league.currentMatchupPeriod,
                 "reg_season_matchup_periods": league.settings.reg_season_count,
                 "playoff_team_count": getattr(league.settings, "playoff_team_count", None),
+                "trade_deadline": trade_deadline(league),
+                "trade_review_hours": getattr(league.settings, "trade_revision_hours", None),
                 "ingested_at": ingested_at,
             }
         ]
