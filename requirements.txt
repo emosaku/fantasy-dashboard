@@ -6,7 +6,8 @@ pandas==3.0.6
 google-cloud-bigquery==3.46.1
 pandas-gbq==0.35.2
 streamlit==1.65.0
-Authlib==1.8.0  # Streamlit's Google sign-in (st.login)
+Authlib==1.8.0  # Streamlit's Google sign-in (st.login), with httpx
+httpx==0.28.1
 plotly==7.1.0
 python-dotenv==1.2.4
 requests==2.34.2
