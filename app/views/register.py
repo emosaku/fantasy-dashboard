@@ -61,7 +61,7 @@ def start_first_load() -> None:
     except Exception:  # the daily run picks it up anyway
         st.warning("Couldn't start the first data load now; it will run tomorrow morning.")
     league.forget_league_cache()
-    st.session_state["league_id"] = league_id
+    league.switch_to(league_id)
     st.success(
         "Registered. The first data load takes a few minutes; then share the invite link "
         "from League settings."

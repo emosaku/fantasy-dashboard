@@ -15,6 +15,16 @@ st.title("Transactions")
 ctx = league.current()
 
 txns = queries.transactions(ctx.league_id, ctx.version)
+if ctx.doc.get("activity_needs_login"):
+    st.info(
+        "ESPN only shares this league's transactions with a login. "
+        + (
+            "Connect a manager's ESPN login on League settings to load them."
+            if ctx.is_commissioner
+            else "The commissioner can connect one to load them."
+        )
+    )
+    st.stop()
 if txns.empty:
     st.info("No activity yet this season.")
     st.stop()

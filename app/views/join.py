@@ -35,7 +35,7 @@ if target is None:
 name = target.get("league_name") or f"League {target['league_id']}"
 if any(m["league_id"] == target["league_id"] for m in league.my_memberships()):
     st.info(f"You're already in **{name}**.")
-    st.session_state["league_id"] = target["league_id"]
+    league.switch_to(target["league_id"])
     st.stop()
 
 teams = {int(t["team_id"]): t["team_name"] for t in target.get("teams", [])}
@@ -61,7 +61,7 @@ if submitted:
         st.error(str(error))
         st.stop()
     league.forget_league_cache()
-    st.session_state["league_id"] = target["league_id"]
+    league.switch_to(target["league_id"])
     st.session_state["joined"] = name
     st.query_params.clear()
     st.rerun()

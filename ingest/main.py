@@ -110,9 +110,16 @@ def ingest_league(league_doc: dict, client, db, cfg: Config, now: dt.datetime) -
     free_agents = polite(lambda: league.free_agents(size=cfg.free_agents))
     rostered = [p for team in league.teams for p in team.roster]
     pool_ids = sorted({p.playerId for p in rostered} | {p.playerId for p in free_agents})
-    topics = fetch_activity(
-        league_id, season, int(league_doc.get("activity_through_ms") or 0), cookies
-    )
+    try:
+        topics = fetch_activity(
+            league_id, season, int(league_doc.get("activity_through_ms") or 0), cookies
+        )
+        activity_needs_login = False
+    except LeagueNotAccessible:
+        # Some public leagues share everything but their activity feed without a login.
+        if cookies:
+            raise NeedsLogin(EXPIRED) from None
+        topics, activity_needs_login = [], True
     details = fetch_player_info(league_id, season, pool_ids, cookies)
     history = {
         s: (ids, fetch_player_history(s, ids) if ids else [])
@@ -165,6 +172,7 @@ def ingest_league(league_doc: dict, client, db, cfg: Config, now: dt.datetime) -
         "activity_through_ms": max(
             [t["date"] for t in topics] + [int(league_doc.get("activity_through_ms") or 0)]
         ),
+        "activity_needs_login": activity_needs_login,
         "last_ingested_at": now,
     }
 

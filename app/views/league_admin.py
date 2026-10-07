@@ -70,10 +70,15 @@ for member in sorted(tenancy.members(db, ctx.league_id), key=lambda m: m.get("na
         tenancy.remove_member(db, ctx.league_id, member["uid"])
         st.rerun()
 
-# --- ESPN login (private leagues) ---------------------------------------------------
-if ctx.doc.get("credentials", "public") != "public":
+# --- ESPN login (private leagues, or public ones whose transactions need it) -----------
+if ctx.doc.get("credentials", "public") != "public" or ctx.doc.get("activity_needs_login"):
     st.subheader("ESPN login")
     saved = ctx.doc.get("credentials", "").startswith("secret:")
+    if not saved and ctx.doc.get("activity_needs_login"):
+        st.caption(
+            "ESPN shares this league's standings, rosters and stats publicly, but only "
+            "shares its transactions with a manager's login. Connect one to load them."
+        )
     if ctx.doc.get("status") == "needs_login":
         st.warning(ctx.doc.get("error") or "This league needs a new ESPN login.")
     elif saved:

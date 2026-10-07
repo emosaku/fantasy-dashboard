@@ -132,10 +132,18 @@ def open_league_ids() -> list[int]:
     ]
 
 
+def switch_to(league_id: int) -> None:
+    """Open this league from the next run on. Pages can't set "league_id" directly:
+    the sidebar's league picker owns that key once it's drawn."""
+    st.session_state["switch_to_league"] = int(league_id)
+
+
 def selected_league_id() -> int | None:
     ids = open_league_ids()
     if not ids:
         return None
+    if st.session_state.get("switch_to_league") in ids:
+        st.session_state["league_id"] = st.session_state.pop("switch_to_league")
     chosen = st.session_state.get("league_id")
     if chosen not in ids:
         chosen = ids[0]
