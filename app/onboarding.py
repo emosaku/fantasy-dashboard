@@ -13,7 +13,7 @@ unit-tested with stubbed ESPN responses.
 import re  # noqa: I001  (settings must come before the ingest imports)
 
 import settings  # noqa: F401  (puts the repo root on the path for the ingest package)
-from ingest.catalog import UnsupportedLeague, league_categories
+from ingest.catalog import UnsupportedLeague, league_categories, scoring_type
 from ingest.espn_client import LeagueNotAccessible, fetch_views
 
 PRIVATE = (
@@ -105,7 +105,7 @@ def preview(league_id: int, season: int, fetch=fetch_views, cookies: dict | None
     )
     return {
         "league_name": raw.get("name") or f"League {league_id}",
-        "scoring_type": raw["scoringSettings"]["scoringType"],
+        "scoring_type": scoring_type(raw["scoringSettings"]),
         "categories": categories,
         "teams": teams,
         "private": cookies is not None,

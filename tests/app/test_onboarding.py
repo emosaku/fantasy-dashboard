@@ -43,6 +43,11 @@ def test_public_supported_league_previews():
     ]
 
 
+def test_espns_each_category_name_previews_as_each_category():
+    out = onboarding.preview(1, 2026, espn("H2H_CATEGORY"))
+    assert out["scoring_type"] == "H2H_EACH_CATEGORY"
+
+
 def test_private_league_asks_for_a_login():
     with pytest.raises(onboarding.NeedsLogin, match="ESPN login"):
         onboarding.preview(1, 2026, refuse("ESPN refused access to this league."))

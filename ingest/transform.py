@@ -10,7 +10,7 @@ import hashlib
 import pandas as pd
 from espn_api.basketball.constant import ACTIVITY_MAP, POSITION_MAP
 
-from ingest.catalog import PLAYER_STATS
+from ingest.catalog import PLAYER_STATS, scoring_type
 
 # ESPN's stat-window keys -> this project's stat_window.
 WINDOW_SUFFIXES = {
@@ -34,7 +34,7 @@ def transform_league_settings(league, raw_settings, league_id, season, ingested_
             {
                 **_base(league_id, season, ingested_at),
                 "league_name": raw_settings.get("name"),
-                "scoring_type": raw_settings["scoringSettings"]["scoringType"],
+                "scoring_type": scoring_type(raw_settings["scoringSettings"]),
                 "team_count": len(league.teams),
                 "current_matchup_period": league.currentMatchupPeriod,
                 "reg_season_matchup_periods": schedule.get("matchupPeriodCount")

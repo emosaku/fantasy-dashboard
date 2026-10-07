@@ -28,7 +28,7 @@ from google.cloud import bigquery
 
 from ingest import registry
 from ingest.bigquery_load import in_list, league_scope, replace_rows
-from ingest.catalog import league_categories
+from ingest.catalog import league_categories, scoring_type
 from ingest.credentials import EXPIRED, NeedsLogin, cookies_for
 from ingest.espn_client import (
     LeagueNotAccessible,
@@ -153,7 +153,7 @@ def ingest_league(league_doc: dict, client, db, cfg: Config, now: dt.datetime) -
     return {
         "league_name": raw.get("name"),
         "season": season,
-        "scoring_type": raw["scoringSettings"]["scoringType"],
+        "scoring_type": scoring_type(raw["scoringSettings"]),
         "categories": categories,
         "teams": [  # plain Python values: Firestore can't store numpy types
             {"team_id": int(t.team_id), "team_name": str(n), "owner": o}

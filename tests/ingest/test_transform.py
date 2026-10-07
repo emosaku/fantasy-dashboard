@@ -66,6 +66,15 @@ def test_league_settings_reads_format_and_season_length():
     assert (row["current_matchup_period"], row["reg_season_matchup_periods"]) == (5, 18)
 
 
+def test_league_settings_stores_espns_each_category_as_each_category():
+    league = SimpleNamespace(
+        teams=[make_team(1)], currentMatchupPeriod=1, settings=SimpleNamespace(reg_season_count=16)
+    )
+    raw = {"scoringSettings": {"scoringType": "H2H_CATEGORY"}, "scheduleSettings": {}}
+    row = transform_league_settings(league, raw, LEAGUE, SEASON, AT).iloc[0]
+    assert row["scoring_type"] == "H2H_EACH_CATEGORY"
+
+
 def test_league_categories_rows_carry_the_league():
     cats = [{"category": "TO", "kind": "count", "num_stat": "TO", "den_stat": None,
              "lower_is_better": True, "display_order": 0}]  # fmt: skip

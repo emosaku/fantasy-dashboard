@@ -46,19 +46,35 @@ PLAYER_STATS = sorted(
 
 SUPPORTED_SCORING_TYPES = {"H2H_MOST_CATEGORIES", "H2H_EACH_CATEGORY"}
 
+# ESPN's scoringType -> League Lab's name. ESPN calls Each Category "H2H_CATEGORY" (the
+# key espn-api's box scores use); League Lab stores the clearer H2H_EACH_CATEGORY and
+# accepts it as input too.
+ESPN_SCORING_TYPES = {
+    "H2H_MOST_CATEGORIES": "H2H_MOST_CATEGORIES",
+    "H2H_CATEGORY": "H2H_EACH_CATEGORY",
+    "H2H_EACH_CATEGORY": "H2H_EACH_CATEGORY",
+}
+
 
 class UnsupportedLeague(Exception):
     """The league's format or categories can't be handled yet; message is for people."""
+
+
+def scoring_type(scoring_settings: dict) -> str | None:
+    """League Lab's name for the league's scoring type, from its raw ESPN
+    scoringSettings. A format League Lab doesn't know comes back as ESPN sent it."""
+    raw = scoring_settings.get("scoringType")
+    return ESPN_SCORING_TYPES.get(raw, raw)
 
 
 def league_categories(scoring_settings: dict) -> list[dict]:
     """The league's categories from its raw ESPN scoringSettings, in ESPN's order:
     [{category, kind, num_stat, den_stat, lower_is_better, display_order}].
     Raises UnsupportedLeague for a format or category League Lab can't compute."""
-    scoring_type = scoring_settings.get("scoringType")
-    if scoring_type not in SUPPORTED_SCORING_TYPES:
+    kind = scoring_type(scoring_settings)
+    if kind not in SUPPORTED_SCORING_TYPES:
         raise UnsupportedLeague(
-            f"This league scores by {scoring_type or 'an unknown format'}. League Lab "
+            f"This league scores by {kind or 'an unknown format'}. League Lab "
             "supports head-to-head categories leagues (Most Categories or Each "
             "Category) for now."
         )
