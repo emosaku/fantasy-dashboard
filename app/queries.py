@@ -103,3 +103,16 @@ def matchup_scores(league_id: int, version: str) -> pd.DataFrame:
 def pro_schedule(league_id: int, version: str) -> pd.DataFrame:
     """The NBA schedule mapped to the league's matchup weeks."""
     return _read("pro_schedule", league_id, version)
+
+
+# --- Draft Tool ---------------------------------------------------------------------------
+
+
+def draft_pool(league_id: int, version: str) -> pd.DataFrame:
+    """The 400 best players by ESPN's draft rank for the league's format."""
+    return _read("draft_pool", league_id, version)
+
+
+def draft_picks(league_id: int, version: str) -> pd.DataFrame:
+    """ESPN's picks for the league's draft, once it shares them."""
+    return _read("draft_picks", league_id, version)

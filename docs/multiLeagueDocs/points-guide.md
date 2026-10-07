@@ -53,6 +53,7 @@ than 0.1 (`points_check` in the registry).
 | **Roster Strength** | Teams by projected points a week, this week's projection and games, bench FP/G, expected wins; points a week by source; each team's lineup (starts and points a week per player) |
 | **Trade Analyzer** | Below |
 | **Player Rankings** | Every player by FP/G with PAR, games this week, season points and each stat's points per game; filters for free agents, rostered, your team, and slot |
+| **Draft** | Your best pick at every turn, judged against the rosters every other team is building; live drafts and mock drafts. See [draft-guide.md](draft-guide.md) |
 
 ## Trade Analyzer
 

@@ -142,6 +142,9 @@ POINTS_PAGES = {
         "views/points/7_Player_Rankings.py", title="Player Rankings",
         icon=":material/person_search:",
     ),
+    "draft": st.Page(
+        "views/points/8_Draft.py", title="Draft", icon=":material/format_list_numbered:"
+    ),
 }  # fmt: skip
 POINTS_BLURBS = [
     (POINTS_PAGES["compare"], "Two teams' weekly points side by side, or up to four players."),
@@ -151,6 +154,7 @@ POINTS_BLURBS = [
     (POINTS_PAGES["strength"], "Each roster's projected weekly points from a daily lineup."),
     (POINTS_PAGES["trade"], "Waiver pickups and win-win trades in expected wins a week."),
     (POINTS_PAGES["players"], "Every player by fantasy points per game, rostered or free agent."),
+    (POINTS_PAGES["draft"], "Your best pick at every turn, against the teams around you."),
 ]
 PAGE_BLURBS = [
     (PAGES["compare"], "Any two teams, category by category, for a week or the season."),

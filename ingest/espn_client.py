@@ -195,6 +195,26 @@ def fetch_activity(
     return topics
 
 
+def fetch_draft_pool(league_id: int, season: int, cookies: dict | None = None,
+                     size: int = 400, rank_type: str = "STANDARD") -> list[dict]:  # fmt: skip
+    """The `size` best players by ESPN's draft rank (STANDARD for points, ROTO for
+    categories), rostered or not, as raw records: ADP, auction value, both draft ranks,
+    eligible slots, injury, and their projected and past stats. With the league's id,
+    ESPN computes each projection's appliedAverage under the league's scoring."""
+    url = LEAGUE_URL.format(season=season, league_id=league_id)
+    filters = {
+        "players": {
+            "limit": size,
+            "sortDraftRanks": {"sortPriority": 100, "sortAsc": True, "value": rank_type},
+            "filterStatsForSourceIds": {"value": [0, 1]},
+            "filterStatsForSplitTypeIds": {"value": [0]},
+        }
+    }
+    headers = {"x-fantasy-filter": json.dumps(filters)}
+    data = _get(url, {"view": "kona_player_info"}, headers, cookies)
+    return [entry["player"] for entry in data.get("players", [])]
+
+
 def check_public(league_id: int, season: int) -> dict:
     """Registration check: the league's settings if ESPN shares them with no login;
     raises LeagueNotAccessible (with a message for the commissioner) otherwise."""

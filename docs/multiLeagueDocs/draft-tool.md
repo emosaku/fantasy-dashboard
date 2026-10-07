@@ -1,7 +1,40 @@
 # Draft Tool: build proposal
 
-*Proposal, October 6, 2026. Branch `DraftTool`, cut from `PointsLeague` at `bbcdf3e`.
-No code yet.*
+*Proposal, October 6, 2026. Branch `DraftTool`, cut from `PointsLeague` at `bbcdf3e`;
+rebased onto `multi-league` (with points leagues) on October 7.*
+
+> **Built, October 7, 2026** (phases 1 and 2, the calibration and part of phase 3, for
+> points leagues; how it works for users is in [draft-guide.md](draft-guide.md)). Not
+> yet merged or deployed. How the build differs from this proposal:
+>
+> - **The goal is your team against theirs.** A pick isn't scored by your own roster's
+>   points with a one-pick lookahead, but by your *expected wins a week once every
+>   roster is full*: each candidate plays out the whole rest of the draft 200 times,
+>   every team's later picks included, and the format compares the finished teams. So
+>   a pick counts what he adds to you, what's likely left for you later, and whom he
+>   keeps from the team that would have taken him.
+> - **One engine for every format.** The draft state, opponent model, simulations and
+>   recommendations know nothing about points (a test checks their imports). A format
+>   supplies `strength`, `expected_wins`, `pick_value` and the ESPN rank its rooms draft
+>   by (`app/draft/formats.py`); points reuses the points engine's fast estimate.
+>   Categories mode is one more class and one branch in `draft/data.py::format_for`.
+> - **The opponent model was fitted by replaying two real drafts** (DON FOOLIO and
+>   Brooklyn, both categories): from many points mid-draft it predicted who'd still be
+>   there 10 picks later. ESPN's ADP pools every format, and players whose categories
+>   rank lagged their ADP slid in both rooms, so the board blends in the format's ESPN
+>   rank (3/4 ADP + 1/4 rank). Brier score 0.124 (0.137 with ADP alone); a manager-level
+>   "fade" and a room-level shift were tried and didn't help.
+> - **Common random numbers**: every candidate is simulated on the same random draws,
+>   so differences between picks are measured to about ±0.005 wins a week.
+> - **Mock drafts are the practice mode** (bots are the fitted opponent model); live
+>   drafts are typed, pasted, or pulled from ESPN on demand (public leagues), rather
+>   than a polling job: phase 0's live check still needs a real draft.
+> - **Keepers, auction drafts, per-player projection overrides and the post-draft
+>   report** aren't built yet.
+> - **Measured:** with one seat drafting by the tool and the rest drafting like real
+>   managers, the tool's team projected best in 10 of 10 drafts, by 107 points and 1.8
+>   expected wins a week on average over the same seat drafting by ADP (scored by the
+>   same projections it drafts with).
 
 ## Summary
 

@@ -8,7 +8,7 @@ import datetime as dt
 import hashlib
 
 import pandas as pd
-from espn_api.basketball.constant import ACTIVITY_MAP, POSITION_MAP, PRO_TEAM_MAP
+from espn_api.basketball.constant import ACTIVITY_MAP, POSITION_MAP, PRO_TEAM_MAP, STATS_MAP
 
 from ingest.catalog import PLAYER_STATS, scoring_type
 
@@ -428,3 +428,119 @@ def transform_pro_schedule(pro_schedule, matchup_periods, played_days, league_id
             }
         )
     return pd.DataFrame(rows).drop_duplicates(["pro_team", "scoring_period"])
+
+
+# --- Draft tool ---------------------------------------------------------------------------
+
+DRAFT_RANK_TYPES = ("STANDARD", "ROTO")
+
+
+def _split(record: dict, season: int, source: int) -> dict | None:
+    for stat in record.get("stats") or []:
+        if (stat.get("seasonId"), stat.get("statSourceId"), stat.get("statSplitTypeId")) == (
+            season, source, 0,
+        ):  # fmt: skip
+            return stat
+    return None
+
+
+def projected_line(record: dict, season: int) -> dict:
+    """His projected per-game stats for the season, by stat name (PTS, 3PM ...)."""
+    proj = _split(record, season, 1) or {}
+    return {STATS_MAP.get(k, k): float(v) for k, v in (proj.get("averageStats") or {}).items()
+            if STATS_MAP.get(k)}  # fmt: skip
+
+
+def transform_draft_pool(records, season, scoring, history, league_id, ingested_at):
+    """One row per player in the draft pool: ADP, auction value, ESPN's draft ranks,
+    eligible slots, injury, projected FP/G (ESPN's applied average for a points
+    league, else our stat x points; NULL without point values) and games, and games
+    played last season and on average over his last 3 (`history`: id -> average)."""
+    rows = []
+    for r in records:
+        proj = _split(r, season, 1) or {}
+        last = _split(r, season - 1, 0) or {}
+        line = projected_line(r, season)
+        applied = proj.get("appliedAverage")
+        fpg = float(applied) if applied else computed_points(line, scoring) if scoring else None
+        ranks = r.get("draftRanksByRankType") or {}
+        owned = r.get("ownership") or {}
+        slots = [POSITION_MAP.get(s, "") for s in r.get("eligibleSlots") or []]
+        rows.append(
+            {
+                **_base(league_id, season, ingested_at),
+                "player_id": int(r["id"]),
+                "player_name": r.get("fullName", ""),
+                "pro_team": PRO_TEAM_MAP.get(r.get("proTeamId"), None),
+                "position": POSITION_MAP.get((r.get("defaultPositionId") or 0) - 1),
+                "eligible_slots": ",".join(s for s in slots if s not in NOT_STARTING),
+                "injury_status": r.get("injuryStatus"),
+                "adp": owned.get("averageDraftPosition"),
+                "auction_value": owned.get("auctionValueAverage"),
+                "percent_owned": owned.get("percentOwned"),
+                "rank": (ranks.get("STANDARD") or {}).get("rank"),
+                "rank_roto": (ranks.get("ROTO") or {}).get("rank"),
+                "proj_fpg": fpg,
+                "proj_games": (proj.get("stats") or {}).get(GAMES_PLAYED_STAT),
+                "last_season_games": (last.get("stats") or {}).get(GAMES_PLAYED_STAT),
+                "history_games": history.get(int(r["id"])),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def transform_draft_pool_stats(records, season, stats, league_id, ingested_at):
+    """Each pool player's projected per-game line, long (player x stat), for the stats
+    a categories league could score."""
+    rows = []
+    for r in records:
+        line = projected_line(r, season)
+        for stat in stats:
+            if stat in line:
+                rows.append(
+                    {
+                        **_base(league_id, season, ingested_at),
+                        "player_id": int(r["id"]),
+                        "stat": stat,
+                        "value": line[stat],
+                    }  # fmt: skip
+                )
+    return pd.DataFrame(rows)
+
+
+def draft_settings(raw_settings: dict, draft_detail: dict) -> dict:
+    """The draft's shape for the registry: type, round-1 order, rounds (every roster
+    spot but IR), seconds a pick, keepers, date, and whether it's done or running."""
+    ds = raw_settings.get("draftSettings") or {}
+    counts = (raw_settings.get("rosterSettings") or {}).get("lineupSlotCounts") or {}
+    rounds = sum(c for s, c in counts.items() if POSITION_MAP.get(int(s)) != "IR")
+    when = ds.get("date")
+    return {
+        "type": ds.get("type"),
+        "pick_order": [int(t) for t in ds.get("pickOrder") or []],
+        "rounds": int(rounds),
+        "seconds_per_pick": ds.get("timePerSelection"),
+        "keepers": ds.get("keeperCount") or 0,
+        "date": dt.datetime.fromtimestamp(when / 1000, tz=dt.UTC) if when else None,
+        "drafted": bool((draft_detail or {}).get("drafted")),
+        "in_progress": bool((draft_detail or {}).get("inProgress")),
+    }
+
+
+def transform_draft_picks(draft_detail, league_id, season, ingested_at):
+    """ESPN's picks, once it shares them (after the draft, or live if it does)."""
+    return pd.DataFrame(
+        [
+            {
+                **_base(league_id, season, ingested_at),
+                "overall": int(p["overallPickNumber"]),
+                "round": int(p["roundId"]),
+                "round_pick": int(p.get("roundPickNumber") or 0),
+                "team_id": int(p["teamId"]),
+                "player_id": int(p["playerId"]),
+                "keeper": bool(p.get("keeper")),
+            }
+            for p in (draft_detail or {}).get("picks") or []
+            if p.get("playerId", -1) > 0
+        ]
+    )

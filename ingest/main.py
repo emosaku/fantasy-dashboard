@@ -13,7 +13,9 @@ the format is confirmed at sign-up and fixed for the season. If ESPN's scoring t
 stops matching it, the league is flagged (format_mismatch) and not refreshed until
 the site owner reloads it in the right format (scripts/set_format.py). A points
 league also loads its point values, every player's fantasy points, the season's
-weekly scores and the NBA schedule.
+weekly scores and the NBA schedule. Every league loads what the Draft Tool reads: the
+draft's settings, the 400 best players by ESPN's draft rank for its format (ADP,
+ranks, projections, games-played history) and ESPN's picks once it shares them.
 
 A league that fails (made private, deleted, unsupported) is marked with the reason
 in the registry; the others carry on. The run fails -- triggering the alert -- only
@@ -22,7 +24,7 @@ rows, their registry entries and any stored credentials.
 
 Env: GCP_PROJECT_ID, SEASON (required); BIGQUERY_DATASET (league_lab); LEAGUE_IDS
 (comma list: manual refresh); PURGE_ONLY (1: only purge); FREE_AGENT_COUNT (100);
-HISTORY_SEASONS (3).
+HISTORY_SEASONS (3); DRAFT_POOL (400).
 """
 
 import datetime as dt
@@ -48,6 +50,7 @@ from ingest.espn_client import (
     LeagueNotAccessible,
     build_league,
     fetch_activity,
+    fetch_draft_pool,
     fetch_player_history,
     fetch_player_info,
     fetch_settings,
@@ -57,8 +60,12 @@ from ingest.espn_client import (
 from ingest.materialize import MATERIALIZED_VIEWS, refresh_statements, table_for
 from ingest.transform import (
     bench_slots,
+    draft_settings,
     lineup_slots,
     points_mismatches,
+    transform_draft_picks,
+    transform_draft_pool,
+    transform_draft_pool_stats,
     transform_free_agents,
     transform_league_categories,
     transform_league_scoring,
@@ -78,7 +85,8 @@ from ingest.transform import (
 LEAGUE_TABLES = [
     "league_settings", "league_categories", "teams", "matchup_categories", "rosters",
     "free_agents", "player_stats", "transactions", "player_details", "league_scoring",
-    "player_points", "matchup_scores", "pro_schedule",
+    "player_points", "matchup_scores", "pro_schedule", "draft_pool", "draft_pool_stats",
+    "draft_picks",
 ]  # fmt: skip
 
 
@@ -101,6 +109,7 @@ class Config:
         self.season = int(env["SEASON"])
         self.free_agents = int(env.get("FREE_AGENT_COUNT", "100"))
         self.history_seasons = int(env.get("HISTORY_SEASONS", "3"))
+        self.draft_pool = int(env.get("DRAFT_POOL", "400"))
         ids = env.get("LEAGUE_IDS", "").strip()
         self.only_ids = {int(i) for i in ids.split(",") if i.strip()} if ids else None
         self.purge_only = env.get("PURGE_ONLY") == "1"
@@ -119,6 +128,21 @@ def missing_history(client, cfg, player_ids) -> dict[int, list[int]]:
     ).result()
     have = {(row.player_id, row.history_season) for row in seen}
     return {s: [p for p in player_ids if (p, s) not in have] for s in seasons}
+
+
+def history_average(client, cfg, player_ids) -> dict[int, float]:
+    """Each player's average games played over the last HISTORY_SEASONS seasons he
+    played (player_seasons)."""
+    if not player_ids:
+        return {}
+    seasons = list(range(cfg.season - cfg.history_seasons, cfg.season))
+    rows = client.query(
+        f"SELECT player_id, AVG(games_played) AS games "
+        f"FROM `{cfg.project}.{cfg.dataset}.player_seasons` "
+        f"WHERE {in_list('player_id', player_ids)} AND {in_list('history_season', seasons)} "
+        "AND games_played IS NOT NULL GROUP BY player_id"
+    ).result()
+    return {int(r.player_id): float(r.games) for r in rows}
 
 
 def ingest_league(league_doc: dict, client, db, cfg: Config, now: dt.datetime) -> dict:
@@ -149,6 +173,11 @@ def ingest_league(league_doc: dict, client, db, cfg: Config, now: dt.datetime) -
     free_agents = polite(lambda: league.free_agents(size=cfg.free_agents))
     rostered = [p for team in league.teams for p in team.roster]
     pool_ids = sorted({p.playerId for p in rostered} | {p.playerId for p in free_agents})
+    draft_detail = fetch_views(league_id, season, ["mDraftDetail"], cookies).get("draftDetail")
+    draft_records = fetch_draft_pool(
+        league_id, season, cookies, cfg.draft_pool, "STANDARD" if points else "ROTO"
+    )
+    draft_ids = [int(r["id"]) for r in draft_records]
     try:
         topics = fetch_activity(
             league_id, season, int(league_doc.get("activity_through_ms") or 0), cookies
@@ -162,7 +191,7 @@ def ingest_league(league_doc: dict, client, db, cfg: Config, now: dt.datetime) -
     details = fetch_player_info(league_id, season, pool_ids, cookies)
     history = {
         s: (ids, fetch_player_history(s, ids) if ids else [])
-        for s, ids in missing_history(client, cfg, pool_ids).items()
+        for s, ids in missing_history(client, cfg, sorted(set(pool_ids) | set(draft_ids))).items()
     }
 
     def load(table, df, extra=""):
@@ -227,6 +256,13 @@ def ingest_league(league_doc: dict, client, db, cfg: Config, now: dt.datetime) -
                 transform_player_seasons({past_season: records}, ids, now),
                 f"{in_list('player_id', ids)} AND history_season = {past_season}",
             )  # fmt: skip
+    games = history_average(client, cfg, draft_ids)
+    load("draft_pool", transform_draft_pool(draft_records, season, scoring, games, league_id, now))
+    load(
+        "draft_pool_stats",
+        transform_draft_pool_stats(draft_records, season, stats, league_id, now),
+    )
+    load("draft_picks", transform_draft_picks(draft_detail, league_id, season, now))
 
     fields = {} if locked else {  # leagues registered before the format lock
         "format": espn_format, "format_season": season, "format_locked_at": now,
@@ -240,6 +276,7 @@ def ingest_league(league_doc: dict, client, db, cfg: Config, now: dt.datetime) -
         "scoring": scoring,
         "lineup_slots": lineup_slots(raw) if points else {},
         "bench_slots": bench_slots(raw) if points else 0,
+        "draft": draft_settings(raw, draft_detail),
         "points_check": points_check,
         "format_mismatch": None,
         "teams": [  # plain Python values: Firestore can't store numpy types

@@ -10,8 +10,12 @@ from types import SimpleNamespace
 import pandas as pd
 from ingest.transform import (
     bench_slots,
+    draft_settings,
     lineup_slots,
     points_mismatches,
+    transform_draft_picks,
+    transform_draft_pool,
+    transform_draft_pool_stats,
     transform_free_agents,
     transform_league_categories,
     transform_league_settings,
@@ -303,3 +307,73 @@ def test_rosters_and_free_agents_carry_team_and_eligible_slots():
     assert (
         transform_free_agents([player], LEAGUE, SEASON, AT).iloc[0]["eligible_slots"] == "PG,G,UT"
     )
+
+
+# --- Draft tool --------------------------------------------------------------------------
+
+
+def pool_record(pid, applied=None, gp=70.0, adp=5.0):
+    return {
+        "id": pid,
+        "fullName": f"Player {pid}",
+        "proTeamId": 2,
+        "defaultPositionId": 5,
+        "eligibleSlots": [4, 9, 10, 11, 12, 13],  # C, PF/C, F/C, UT, BE, IR
+        "injuryStatus": "ACTIVE",
+        "ownership": {"averageDraftPosition": adp, "auctionValueAverage": 30.0,
+                      "percentOwned": 99.0},
+        "draftRanksByRankType": {"STANDARD": {"rank": 4}, "ROTO": {"rank": 9}},
+        "stats": [
+            {"seasonId": SEASON, "statSourceId": 1, "statSplitTypeId": 0, "appliedAverage": applied,
+             "averageStats": {"0": 20.0, "14": 15.0, "6": 10.0, "42": 1.0}, "stats": {"42": gp}},
+            {"seasonId": SEASON - 1, "statSourceId": 0, "statSplitTypeId": 0,
+             "stats": {"42": 61.0}},
+        ],
+    }  # fmt: skip
+
+
+def test_draft_pool_rows_carry_adp_ranks_and_projections():
+    records = [pool_record(1), pool_record(2, applied=33.5)]
+    df = transform_draft_pool(records, SEASON, SCORING, {1: 58.0}, LEAGUE, AT).set_index(
+        "player_id"
+    )
+    one = df.loc[1]
+    assert (one["pro_team"], one["position"], one["eligible_slots"]) == (
+        "BOS",
+        "C",
+        "C,PF/C,F/C,UT",
+    )
+    assert (one["adp"], one["rank"], one["rank_roto"]) == (5.0, 4, 9)
+    assert one["proj_fpg"] == 20 - 15 + 10  # our stat x points: ESPN sent no applied average
+    assert df.loc[2, "proj_fpg"] == 33.5  # ESPN's own, when it has one
+    assert (one["proj_games"], one["last_season_games"], one["history_games"]) == (70, 61, 58)
+    assert pd.isna(df.loc[2, "history_games"])
+    no_points = transform_draft_pool(records[:1], SEASON, [], {}, LEAGUE, AT).iloc[0]
+    assert pd.isna(no_points["proj_fpg"])  # a categories league has no point values
+
+
+def test_draft_pool_stats_keep_the_projected_line():
+    df = transform_draft_pool_stats([pool_record(1)], SEASON, ["PTS", "REB", "AST"], LEAGUE, AT)
+    assert dict(zip(df["stat"], df["value"], strict=True)) == {"PTS": 20.0, "REB": 10.0}
+
+
+def test_draft_settings_count_every_roster_spot_but_ir():
+    raw = {
+        "draftSettings": {"type": "SNAKE", "pickOrder": [3, 1, 2], "timePerSelection": 60,
+                          "keeperCount": 0, "date": 1_791_337_080_000},
+        "rosterSettings": {"lineupSlotCounts": {"0": 1, "11": 3, "12": 3, "13": 2}},
+    }  # fmt: skip
+    s = draft_settings(raw, {"drafted": False, "inProgress": True})
+    assert (s["type"], s["pick_order"], s["rounds"]) == ("SNAKE", [3, 1, 2], 7)
+    assert s["date"] == dt.datetime(2026, 10, 7, 1, 38, tzinfo=dt.UTC)
+    assert (s["drafted"], s["in_progress"]) == (False, True)
+
+
+def test_draft_picks_skip_empty_keeper_slots():
+    detail = {"picks": [
+        {"overallPickNumber": 1, "roundId": 1, "roundPickNumber": 1, "teamId": 6, "playerId": 9},
+        {"overallPickNumber": 2, "roundId": 1, "roundPickNumber": 2, "teamId": 8, "playerId": -1},
+    ]}  # fmt: skip
+    df = transform_draft_picks(detail, LEAGUE, SEASON, AT)
+    assert list(df["player_id"]) == [9] and not df["keeper"].any()
+    assert transform_draft_picks(None, LEAGUE, SEASON, AT).empty
