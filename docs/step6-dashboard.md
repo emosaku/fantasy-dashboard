@@ -22,7 +22,7 @@ Streamlit app (Cloud Run service, Step 7)
    │  app/Home.py: login gate, st.navigation, standings, sidebar (who's signed in,
    │  "Data updated", Refresh data)
    ▼
-app/pages/*.py  -- one file per page: controls + charts, no SQL
+app/views/*.py  -- one file per page: controls + charts, no SQL
    │
    ├──► app/queries.py      -- one function per view, the only place SQL lives;
    │                            every read cached for an hour

@@ -1,5 +1,5 @@
 """Streamlit entry point (Step 6). Multipage app via the st.navigation pages API;
-the six feature pages live in app/pages/. Everything sits behind a manager login
+the six feature pages live in app/views/. Everything sits behind a manager login
 (app/login.py); until someone signs in, the login page is the only page. Run
 locally with:
 
@@ -48,23 +48,25 @@ def home() -> None:
         st.caption(blurb)
 
 
+# Page files must not live in a folder named pages/: with one next to this file, a fresh
+# server process serves each of them straight from its URL, skipping the login.
 PAGES = {
-    "compare": st.Page("pages/1_Compare.py", title="Compare", icon=":material/compare_arrows:"),
+    "compare": st.Page("views/1_Compare.py", title="Compare", icon=":material/compare_arrows:"),
     "power": st.Page(
-        "pages/2_Power_Rankings.py", title="Power Rankings", icon=":material/leaderboard:"
+        "views/2_Power_Rankings.py", title="Power Rankings", icon=":material/leaderboard:"
     ),
     "luck": st.Page(
-        "pages/3_Matchups_and_Luck.py", title="Matchups and Luck", icon=":material/casino:"
+        "views/3_Matchups_and_Luck.py", title="Matchups and Luck", icon=":material/casino:"
     ),
-    "txn": st.Page("pages/4_Transactions.py", title="Transactions", icon=":material/swap_horiz:"),
+    "txn": st.Page("views/4_Transactions.py", title="Transactions", icon=":material/swap_horiz:"),
     "strength": st.Page(
-        "pages/5_Roster_Strength.py", title="Roster Strength", icon=":material/fitness_center:"
+        "views/5_Roster_Strength.py", title="Roster Strength", icon=":material/fitness_center:"
     ),
     "trade": st.Page(
-        "pages/6_Trade_Analyzer.py", title="Trade Analyzer", icon=":material/handshake:"
+        "views/6_Trade_Analyzer.py", title="Trade Analyzer", icon=":material/handshake:"
     ),
     "players": st.Page(
-        "pages/7_Player_Rankings.py", title="Player Rankings", icon=":material/person_search:"
+        "views/7_Player_Rankings.py", title="Player Rankings", icon=":material/person_search:"
     ),
 }
 PAGE_BLURBS = [

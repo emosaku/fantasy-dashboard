@@ -240,7 +240,7 @@ today's searches untouched.
 | `app/analysis/trades.py` | The balancing step (drop the lowest, add the best free agents) moves out of `_offers_with` into a helper both searches share; behaviour unchanged |
 | `app/analysis/explain.py` | `group_pitch()` for the one-post message; `explain()` and `pitch_text()` reused per team |
 | `app/analyzer.py` | Cached `three_team_for_target()` and `three_team_offers()`, keyed on plain values like `offers()` |
-| `app/pages/6_Trade_Analyzer.py` | Create a trade: the three-team mode, its card and the shortcut. Mock trade: the 2 / 3 switch, three boxes, three-team results |
+| `app/views/6_Trade_Analyzer.py` | Create a trade: the three-team mode, its card and the shortcut. Mock trade: the 2 / 3 switch, three boxes, three-team results |
 | `ingest/`, `sql/ddl/league_status.sql` | Two new columns: trade deadline and trade review hours |
 | `tests/app/test_analysis.py` | The tests below; the synthetic 4-team league already has enough teams |
 | `docs/` | Trade Analyzer guide, site guide and metrics: three-team mode, the ESPN plan, middle-team risk |

@@ -155,7 +155,7 @@ def compare_players(ids) -> None:
     takes at most 4; an uneven Offer Builder deal can involve up to 6, so clip to
     the first 4 (give side first -- the players this manager is giving up)."""
     st.session_state["compare-players"] = [int(i) for i in ids][:4]
-    st.switch_page("pages/1_Compare.py")
+    st.switch_page("views/1_Compare.py")
 
 
 profile_tab, waiver_tab, finder_tab, create_tab, mock_tab = st.tabs(
