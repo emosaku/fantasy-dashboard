@@ -29,6 +29,14 @@ rebased onto `multi-league` (with points leagues) on October 7.*
 > - **Mock drafts are the practice mode** (bots are the fitted opponent model); live
 >   drafts are typed, pasted, or pulled from ESPN on demand (public leagues), rather
 >   than a polling job: phase 0's live check still needs a real draft.
+> - **Not tied to any league** (changed the same day): leagues are registered after their
+>   drafts, so the Draft page is a standalone mock draft anyone signed in can run at any
+>   time. You enter the setup (teams, rounds, your position, lineup and point values,
+>   ESPN's defaults filled in); players and the NBA schedule come from ESPN's
+>   league-independent data; drafts are saved to your account and resume where you left
+>   off. Typing every pick to follow a real draft elsewhere is still there. The daily
+>   data pull keeps saving registered leagues' finished drafts, only to refit the
+>   opponent model.
 > - **Keepers, auction drafts, per-player projection overrides and the post-draft
 >   report** aren't built yet.
 > - **Measured:** with one seat drafting by the tool and the rest drafting like real

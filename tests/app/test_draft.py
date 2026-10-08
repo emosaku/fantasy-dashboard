@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from draft import calibrate, recommend, simulate, store
+from draft import calibrate, recommend, simulate, sources, store
 from draft import pool as dpool
 from draft.formats import DraftFormat, PointsFormat
 from draft.simulate import OpponentModel
@@ -384,13 +384,37 @@ def test_espns_picks_replace_entered_ones_and_later_entries_stay():
     assert again.picks == [(1, 10), (2, 30), (1, 40)]
 
 
-def test_a_live_draft_survives_a_reload():
+def test_your_drafts_are_saved_and_stay_yours():
     db = FakeFirestore()
-    draft = Draft(Order((4, 7), rounds=2))
+    setup = sources.make(2027, teams=2, rounds=2, position=1)
+    draft = Draft(setup.order)
     draft.add(11)
     now = dt.datetime(2026, 10, 7, tzinfo=dt.UTC)
-    store.save(db, 5, 2027, draft, "u-ana", now)
-    assert store.load(db, 5, 2027) == draft
-    assert store.load(db, 5, 2026) is None
-    store.clear(db, 5, 2027)
-    assert store.load(db, 5, 2027) is None
+    mine = store.doc_id("u-ana", setup, "bots")
+    assert mine != store.doc_id("u-ben", setup, "bots") != store.doc_id("u-ana", setup, "entered")
+    store.save(db, mine, draft, "u-ana", now)
+    assert store.load(db, mine) == draft
+    assert store.load(db, store.doc_id("u-ben", setup, "bots")) is None
+    store.clear(db, mine)
+    assert store.load(db, mine) is None
+
+
+# --- A draft's setup --------------------------------------------------------------------------
+
+
+def test_a_draft_is_set_up_with_espns_defaults():
+    s = sources.make(2027, teams=8, rounds=12, position=3)
+    assert s.order.teams == tuple(range(1, 9)) and s.order.rounds == 12 and s.order.snake
+    assert s.names[3] == "You" and s.names[1] == "Team 1" and s.my_team == 3
+    assert dict(s.scoring) == dict(sources.ESPN_POINTS) and s.starting == 10 and s.bench == 3
+    assert s.format == "points" and s.last_week == sources.REGULAR_WEEKS
+
+
+def test_a_setups_key_changes_with_anything_that_changes_the_draft():
+    s = sources.make(2027, teams=8, rounds=12, position=3)
+    assert s.key == sources.make(2027, teams=8, rounds=12, position=3).key
+    assert s.key != sources.make(2027, teams=8, rounds=12, position=4).key
+    other = sources.make(2027, 8, 12, 3, scoring=[("PTS", 1.0), ("REB", 0.0)])
+    assert other.key != s.key and other.scoring == (("PTS", 1.0),)  # zero-point stats left out
+    no_c = sources.make(2027, 8, 12, 3, slots=[("PG", 2), ("C", 0), ("UT", 4)])
+    assert no_c.slots == (("PG", 2), ("UT", 4))

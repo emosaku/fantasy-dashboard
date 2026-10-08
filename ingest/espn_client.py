@@ -215,6 +215,36 @@ def fetch_draft_pool(league_id: int, season: int, cookies: dict | None = None,
     return [entry["player"] for entry in data.get("players", [])]
 
 
+def fetch_default_pool(season: int, size: int = 400, rank_type: str = "STANDARD") -> list[dict]:
+    """The same 400 players as fetch_draft_pool, with no league: ESPN's league-independent
+    player data (ADP, ranks, projected stats, eligible slots). Projections carry no
+    league's applied points; compute them from the projected stat lines."""
+    filters = {
+        "players": {
+            "limit": size,
+            "sortDraftRanks": {"sortPriority": 100, "sortAsc": True, "value": rank_type},
+            "filterStatsForSourceIds": {"value": [0, 1]},
+            "filterStatsForSplitTypeIds": {"value": [0]},
+        }
+    }
+    headers = {"x-fantasy-filter": json.dumps(filters)}
+    data = _get(DEFAULTS_URL.format(season=season), {"view": "kona_player_info"}, headers, None)
+    return [entry["player"] for entry in data.get("players", [])]
+
+
+SEASON_URL = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons/{season}"
+
+
+def fetch_pro_schedule(season: int) -> dict:
+    """The season's NBA schedule with no league: {NBA team id: {scoring period: [game]}},
+    the shape espn-api's League.pro_schedule has."""
+    data = _get(SEASON_URL.format(season=season), {"view": "proTeamSchedules_wl"}, None, None)
+    return {
+        int(team["id"]): team.get("proGamesByScoringPeriod") or {}
+        for team in (data.get("settings") or {}).get("proTeams") or []
+    }
+
+
 def check_public(league_id: int, season: int) -> dict:
     """Registration check: the league's settings if ESPN shares them with no login;
     raises LeagueNotAccessible (with a message for the commissioner) otherwise."""

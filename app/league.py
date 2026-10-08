@@ -182,7 +182,7 @@ def build_context(league_id: int) -> Context | None:
         name=doc.get("league_name") or f"League {league_id}",
         season=int(doc["season"]),
         scoring_type=doc.get("scoring_type", "H2H_MOST_CATEGORIES"),
-        cats=from_records(doc["categories"]),
+        cats=from_records(doc.get("categories") or []),
         version=doc["last_ingested_at"].isoformat(),
         team_names=teams,
         my_team=member.get("team_id"),
@@ -206,6 +206,10 @@ def current() -> Context:
             "You're not in a league yet. Register one, or open your commissioner's invite link."
         )
         st.page_link("views/register.py", label="Register a league", icon=":material/add:")
+        st.page_link(
+            "views/draft.py", icon=":material/format_list_numbered:",
+            label="Or run a mock draft: the Draft page works any time, no league needed",
+        )  # fmt: skip
         st.stop()
     ctx = build_context(league_id)
     if ctx is None:

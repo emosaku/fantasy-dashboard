@@ -20,7 +20,7 @@ joins as a member.
 flowchart TB
     O["Site owner · runs League Lab<br/>Who can sign in · each league's format · updates, and shutting the site down"]
     C["Commissioner · one per league, whoever registered it<br/>Invite link · members · the ESPN login · deleting the league · Trade Analyzer for any team"]
-    M["Member · everyone who joined with the invite link<br/>Every page · their own team · Refresh data · the live draft"]
+    M["Member · everyone who joined with the invite link<br/>Every page · their own team · Refresh data"]
     O -- "decides who can sign in" --> C
     C -- "invites and removes" --> M
 ```
@@ -140,13 +140,13 @@ team shows its best moves, but changes nothing for that team.
 Everything else on League Lab is open to every member, commissioner or not.
 
 - **Every page of the league:** Home, Compare, Power Rankings, Matchups and Luck,
-  Transactions, Roster Strength, Player Rankings, the Trade Analyzer for their own team,
-  and the Draft page (which anyone signed in can use, with or without a league).
+  Transactions, Roster Strength, Player Rankings and the Trade Analyzer for their own
+  team.
 - **Their own team:** pick or change it on League settings, from the teams nobody has
   claimed.
 - **Refresh data:** pull the latest from ESPN from the sidebar, once an hour per league.
-- **The live draft:** enter, paste or undo picks in the league's shared live draft. It
-  has no commissioner-only controls.
+- **The Draft page:** isn't part of any league. Anyone signed in can run a mock draft
+  there at any time, and their drafts are their own.
 - **Keep the league updating:** a league refreshes every morning as long as someone in
   it has opened it in the last 14 days. Any member's visit counts.
 - **Register their own leagues,** and be the commissioner of those.

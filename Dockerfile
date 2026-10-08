@@ -20,7 +20,7 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 COPY .streamlit/config.toml .streamlit/config.toml
-COPY ingest/__init__.py ingest/catalog.py ingest/espn_client.py ingest/
+COPY ingest/__init__.py ingest/catalog.py ingest/espn_client.py ingest/transform.py ingest/
 COPY app/ app/
 
 # Cloud Run sends traffic to $PORT (8080 by default).

@@ -1,11 +1,37 @@
 # League Lab Draft Tool: how it works
 
-*October 7, 2026. Branch `DraftTool`. Points leagues; categories next.*
+*October 7, 2026. Branch `DraftTool`. Points drafts; categories next.*
 
 The Draft page suggests your best pick at every turn: the player that leaves **your
 finished team strongest against the finished teams around it**. As the draft goes, it
 tracks every team's roster and plays out everyone's remaining picks, so each suggestion
 is judged against what the competition is actually building.
+
+It isn't tied to any league. It's a mock draft anyone signed in can run at any time:
+before a league is on League Lab (leagues are registered after their drafts), or with
+no league at all.
+
+## Setting up a draft
+
+Pick the number of teams, the rounds and your draft position. **Lineup and point values**
+holds the starting slots, bench spots and each stat's points, with ESPN's defaults filled
+in (PG, SG, SF, PF, C, G, F, 3 UT and 3 bench; PTS +1, 3PM +1, FGM +2, FGA −1, FTM +1,
+FTA −1, REB +1, AST +2, STL +4, BLK +4, TO −2). Change them to match your league.
+
+- **Players and the NBA schedule** come from ESPN's league-independent data, refreshed
+  daily: the 400 best players by ESPN's points draft rank, with ADP, ESPN's ranks,
+  projected stats and games, and eligible slots.
+- **Fantasy points** are each player's projected stats × your point values, so bonus
+  stats such as double-doubles aren't counted.
+- **Injury history** is League Lab's games-played history over the last 3 seasons, or
+  last season's games for a player it hasn't seen.
+
+## Your drafts are saved
+
+Every pick is saved to your account as you go: leave mid-draft and pick up where you
+left off, on any device you're signed in on. Each setup keeps its own draft (change the
+settings and you start a fresh one; change them back and your draft is there). When a
+draft ends, **Start a new draft** clears it; **Start over** does the same any time.
 
 ## On the page
 
@@ -36,18 +62,16 @@ is judged against what the competition is actually building.
 3 seasons' average; Avoid: capped, and 15% fewer for players who average under 60 games
 or are OUT) and *Simulations* (100, 200 or 400 a suggestion).
 
-## Live or mock
+## Who makes the other picks
 
-- **Mock draft:** pick your draft position. The other seats are bots that draft like
-  real managers (below). They pick up to your turn on their own; *Bots pick right away*
-  turns that off.
-- **Live draft:** the picks are saved for the league, so the page can be open on a phone
-  and a laptop at once and a refresh loses nothing.
-  - **Follow along** re-reads the draft every 3 seconds, for a second screen.
-  - **Picking for another team** covers traded picks.
-  - **Paste picks** catches up from text copied out of ESPN's draft room.
-  - **Get picks from ESPN** pulls ESPN's picks for a public league and replaces any typed
-    pick they contradict. ESPN may only publish picks once the draft is over.
+- **Bots make them** (a mock draft): the other seats draft like real managers (below).
+  They pick up to your turn on their own; *Bots pick right away* turns that off, and
+  *Bots pick to my turn* runs them by hand. **Undo** takes back your last pick and the
+  bots' picks after it.
+- **I enter each one** (following a real draft elsewhere): type every pick as it
+  happens. *Picking for another team* covers traded picks, *Paste picks* catches up from
+  text copied out of a draft room, and *Follow along* re-reads the draft every 3 seconds
+  for a second screen. This draft is saved separately from your mock draft.
 
 ## How a pick is scored
 
@@ -84,7 +108,8 @@ Brooklyn), it predicted who'd still be there 10 picks later:
 | 90% and over | 922 | 95% | 94% |
 
 `python scripts/calibrate_draft.py --project league-lab-emk` refits it on every draft
-ESPN has published for a registered league.
+ESPN has published for a registered league: the daily data pull still saves those
+drafts for this, though the Draft page itself never uses a league.
 
 ## Limits
 
@@ -94,7 +119,7 @@ ESPN has published for a registered league.
 - **Rarely-drafted players.** Players ESPN rates likely to go early sometimes last
   longer than predicted (the first row above), so a "he won't last" is a little
   pessimistic.
-- **Pool.** The 400 best players by ESPN's draft rank. A pick outside it holds a roster
-  spot with no value.
+- **Pool.** The 400 best players by ESPN's points draft rank. A pick outside it holds a
+  roster spot with no value.
 - **Not yet supported:** keepers, auction drafts, adjusting a player's projection by
-  hand, and categories leagues.
+  hand, and categories drafts.
