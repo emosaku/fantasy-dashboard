@@ -19,6 +19,7 @@ ingest/*
 !ingest/__init__.py
 !ingest/catalog.py
 !ingest/espn_client.py
+!ingest/transform.py
 sql/
 tests/
 notebooks/
