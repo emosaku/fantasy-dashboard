@@ -131,6 +131,26 @@ Try any deal by hand. Pick a partner, then **You send** and **You get**. Choose 
 
 Below that, as before: every player in the deal with health and games-played history, each team's category ranks before and after, and per-game totals before and after.
 
+## Saved trades *(new)*
+
+Keep the deals worth coming back to. **Save trade** sits beside **Load into mock trade**
+on every Waiver wire move, Trade finder deal and Create a trade deal (Search by player and
+Offer Builder), and under the result in Mock trade. The **Saved trades** tab holds them,
+for the team you're analyzing.
+
+- **Ranked best first** by what each one does for your team with today's data, scored
+  exactly as Mock trade would score it: category wins in a categories league, expected
+  wins a week in a points league. The partner's change is shown beside yours.
+- **Checked against today's rosters** every time the tab opens, so after each daily data
+  load or Refresh data. A trade is removed, with a note saying why, once a player you'd
+  send or drop has left your team, a player you'd get or the partner would drop has left
+  theirs, or a free agent in it has been picked up.
+- **Saved once:** saving the same move again keeps one copy.
+- **Open in Mock trade** loads a saved trade back, adds and drops included; **Remove**
+  deletes it.
+- **Yours only:** each person's saved trades are their own, per league and team, and
+  they're deleted with the league.
+
 ## Limits and tips
 
 - **It models category wins, not people.** "Likely to work" means the deal helps their categories and looks fair by value. Their roster loyalty, playoff plans or hunches can still say no.

@@ -12,6 +12,7 @@ trade shows for a loaded deal. The math lives in app/points (tested).
 import pandas as pd
 import streamlit as st
 
+import saved_view
 import ui
 from points import data, explain, model, view
 from points.trades import (
@@ -71,6 +72,20 @@ def load_into_mock(partner, give=(), get=(), my_add=(), my_drop=(), their_add=()
                            ("pmock-their-drop", their_drop)):  # fmt: skip
         st.session_state[state_key] = [int(x) for x in ids]
     st.toast("Loaded. Open the Mock trade tab to see it.")
+
+
+def open_saved(trade) -> None:
+    """Button callback: a saved trade back into Mock trade."""
+    load_into_mock(trade.partner, trade.give, trade.get, trade.my_add, trade.my_drop,
+                   trade.their_add, trade.their_drop)  # fmt: skip
+
+
+def save_button(where, key: str, source: str, partner, give=(), get=(), my_add=(), my_drop=(),
+                their_add=(), their_drop=()) -> None:  # fmt: skip
+    """A Save trade button for one move (load_into_mock's arguments)."""
+    saved_view.button(where, ctx.league_id, me, key, source,
+                      (partner, give, get, my_drop, their_drop, my_add, their_add),
+                      lambda p: name.get(p))  # fmt: skip
 
 
 def compare_players(ids) -> None:
@@ -133,7 +148,10 @@ def deal_details(deals: pd.DataFrame, prefix: str) -> None:
             st.caption(their)
         st.markdown("**The pitch**")
         st.code(explain.pitch(players, deal), language=None, wrap_lines=True)
-        b1, b2 = st.columns(2)
+        b1, b2, b3 = st.columns(3)
+        save_button(b3, prefix, "Trade finder" if prefix == "finder" else "Create a trade",
+                    deal["partner_id"], deal["give_ids"], deal["get_ids"], deal["my_add_ids"],
+                    deal["my_drop_ids"], deal["their_add_ids"], deal["their_drop_ids"])  # fmt: skip
         b1.button(
             "Load into mock trade", key=f"{prefix}-load", on_click=load_into_mock,
             args=(deal["partner_id"], deal["give_ids"], deal["get_ids"], deal["my_add_ids"],
@@ -145,8 +163,8 @@ def deal_details(deals: pd.DataFrame, prefix: str) -> None:
         )  # fmt: skip
 
 
-profile_tab, waiver_tab, finder_tab, create_tab, mock_tab = st.tabs(
-    ["Team profile", "Waiver wire", "Trade finder", "Create a trade", "Mock trade"]
+profile_tab, waiver_tab, finder_tab, create_tab, mock_tab, saved_tab = st.tabs(
+    ["Team profile", "Waiver wire", "Trade finder", "Create a trade", "Mock trade", "Saved trades"]
 )
 
 # --- Team profile ----------------------------------------------------------------------------
@@ -236,9 +254,10 @@ with waiver_tab:
                             key="waiver-pick")  # fmt: skip
         move = moves.iloc[pick]
         drop = [] if pd.isna(move["drop_id"]) else [int(move["drop_id"])]
-        w1, w2 = st.columns(2)
+        w1, w2, w3 = st.columns(3)
         w1.button("Load into mock trade", key="waiver-load", on_click=load_into_mock,
                   args=(FREE_AGENTS, drop, [int(move["add_id"])]))  # fmt: skip
+        save_button(w3, "waiver", "Waiver wire", FREE_AGENTS, drop, [int(move["add_id"])])
         w2.button("Compare players", key="waiver-compare", on_click=compare_players,
                   args=([int(move["add_id"]), *drop],))  # fmt: skip
 
@@ -342,6 +361,23 @@ with create_tab:
             deal_details(found, "ptarget")
 
 # --- Mock trade -----------------------------------------------------------------------------
+with saved_tab:
+
+    def score_saved(trade):
+        """(your change in expected wins a week, theirs or None), as Mock trade scores it."""
+        them = None if trade.is_waiver else trade.partner
+        if any(p not in players.index for p in trade.players()) or (
+            them is not None and them not in team_ids
+        ):
+            return None
+        moves = (trade.give, trade.get, trade.my_add, trade.my_drop, trade.their_add,
+                 trade.their_drop)  # fmt: skip
+        result = data.mock_trade(key, me, them, *moves)
+        return float(result["dE"][me]), None if them is None else float(result["dE"][them])
+
+    saved_view.section(ctx.league_id, me, players, lambda p: name.get(p), team_label,
+                       score_saved, "expected wins a week", open_saved)  # fmt: skip
+
 with mock_tab:
     partners = [FREE_AGENTS, *[t for t in team_ids if t != me]]
     keep_valid("pmock-partner", partners, multi=False)
@@ -397,6 +433,8 @@ with mock_tab:
     moves = (tuple(give), tuple(get), tuple(my_add), tuple(my_drop), tuple(their_add),
              tuple(their_drop))  # fmt: skip
     out = data.mock_trade(key, me, None if waiver else partner, *moves)
+    save_button(st, "pmock", "Mock trade", partner, give, get, my_add, my_drop, their_add,
+                their_drop)  # fmt: skip
     sides = [me] if waiver else [me, partner]
     columns = st.columns(len(sides))
     for col, team in zip(columns, sides, strict=True):

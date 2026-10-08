@@ -11,6 +11,7 @@ Collections (all small documents):
                           format_locked_at, format_confirmed_by, format_mismatch,
                           scoring and lineup_slots (points leagues), points_check
   members/{league_id}__{uid} -- league_id, uid, email, name, team_id, role, joined_at
+  saved_trades/{league}-{uid}-{id} -- a member's saved trade (app/saved_store.py)
   users/{uid}          -- email, name, created_at, last_seen_at
 
 Ingest reads which leagues to refresh and records progress; it never touches users or
@@ -90,9 +91,12 @@ def record_format_mismatch(db, league_id: int, espn_format: str, now: dt.datetim
 
 
 def delete_league(db, league_id: int) -> None:
-    """Remove the league and every membership in it."""
-    for member in (
-        db.collection("members").where(filter=FieldFilter("league_id", "==", league_id)).stream()
-    ):
-        member.reference.delete()
+    """Remove the league, every membership in it and every trade saved in it."""
+    for collection in ("members", "saved_trades"):
+        for doc in (
+            db.collection(collection)
+            .where(filter=FieldFilter("league_id", "==", league_id))
+            .stream()
+        ):
+            doc.reference.delete()
     db.collection("leagues").document(str(league_id)).delete()

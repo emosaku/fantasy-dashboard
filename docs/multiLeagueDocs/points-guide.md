@@ -72,6 +72,9 @@ spots, games per week, positions and injuries.
   brings him over, labelled Likely to work / Costs you / They'd likely say no).
 - **Mock trade**: any trade or waiver move with your own adds and drops; both teams'
   points a week and expected wins before and after, and your lineup after.
+- **Saved trades**: deals saved from the other tabs, ranked by expected wins a week
+  for your team with today's data, and removed once roster changes make them
+  impossible. See [trade-analyzer.md](trade-analyzer.md).
 
 Rules carried over from categories leagues:
 
