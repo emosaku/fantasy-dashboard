@@ -1,6 +1,6 @@
 # What `gcloud run deploy --source .` must NOT upload to Cloud Build. Only the
 # dashboard's image is built from here, and it needs just Dockerfile,
-# requirements.txt, app/, .streamlit/config.toml and three files of ingest/.
+# requirements.txt, app/, .streamlit/config.toml and four files of ingest/.
 
 # Secrets -- never leave this machine
 .env
@@ -21,6 +21,7 @@ ingest/*
 !ingest/__init__.py
 !ingest/catalog.py
 !ingest/espn_client.py
+!ingest/transform.py
 sql/
 tests/
 notebooks/
