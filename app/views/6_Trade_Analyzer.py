@@ -19,6 +19,7 @@ import streamlit as st
 import analyzer
 import login
 import queries
+import saved_view
 import ui
 from analysis.explain import explain, group_pitch, pitch_text
 from analysis.objective import expected_category_wins, matchup_record
@@ -150,6 +151,22 @@ def load_circle_into_mock(circle, packages, my_drop=(), my_add=()) -> None:
     st.toast("Loaded. Open the Mock trade tab to see it.")
 
 
+def open_saved(trade) -> None:
+    """Button callback: a saved trade back into Mock trade."""
+    load_into_mock(trade.partner, trade.give, trade.get, trade.my_drop, trade.their_drop,
+                   trade.my_add, trade.their_add)  # fmt: skip
+
+
+def deal_args(deal) -> tuple:
+    """A found deal as load_into_mock's arguments."""
+    return (deal["partner_id"], deal["give_ids"], deal["get_ids"], deal["my_drop_id"],
+            deal["their_drop_id"], deal["my_add_id"], deal["their_add_id"])  # fmt: skip
+
+
+def save_button(where, key: str, source: str, args: tuple) -> None:
+    saved_view.button(where, me, key, source, args, player_name.get)
+
+
 def compare_players(ids) -> None:
     """Button callback: open Compare in Players mode with these players. Compare
     takes at most 4; an uneven Offer Builder deal can involve up to 6, so clip to
@@ -158,8 +175,8 @@ def compare_players(ids) -> None:
     st.switch_page("views/1_Compare.py")
 
 
-profile_tab, waiver_tab, finder_tab, create_tab, mock_tab = st.tabs(
-    ["Team profile", "Waiver wire", "Trade finder", "Create a trade", "Mock trade"]
+profile_tab, waiver_tab, finder_tab, create_tab, mock_tab, saved_tab = st.tabs(
+    ["Team profile", "Waiver wire", "Trade finder", "Create a trade", "Mock trade", "Saved trades"]
 )
 
 # --- Team profile ------------------------------------------------------------------
@@ -230,13 +247,14 @@ with waiver_tab:
                 f"{LABELS[down]} {dz[down]:+.2f} z · value to you Δv {move['dv']:+.2f} · "
                 f"{move['add_name']} is {str(move['injury_status']).replace('_', ' ').lower()}"
             )
-            wb1, wb2 = st.columns(2)
+            wb1, wb2, wb3 = st.columns(3)
             wb1.button(
                 "Load into mock trade",
                 key=f"waiver-load-{k}",
                 on_click=load_into_mock,
                 args=(0, [move["drop_id"]], [move["add_id"]]),
             )
+            save_button(wb3, f"waiver-{k}", "Waiver wire", (0, [move["drop_id"]], [move["add_id"]]))
             wb2.button(
                 "Compare players",
                 key=f"waiver-compare-{k}",
@@ -299,7 +317,8 @@ with finder_tab:
                     f"General value (total z): you give {deal['gen_give']:+.2f}, "
                     f"you get {deal['gen_get']:+.2f}."
                 )
-                tb1, tb2 = st.columns(2)
+                tb1, tb2, tb3 = st.columns(3)
+                save_button(tb3, f"trade-{k}", "Trade finder", deal_args(deal))
                 tb1.button(
                     "Load into mock trade",
                     key=f"trade-load-{k}",
@@ -398,7 +417,8 @@ def deal_card(deal, key: str) -> None:
         moves = roster_moves(deal)
         if moves:
             st.caption(moves)
-        db1, db2 = st.columns(2)
+        db1, db2, db3 = st.columns(3)
+        save_button(db3, key, "Create a trade", deal_args(deal))
         db1.button(
             "Load into mock trade",
             key=key,
@@ -812,7 +832,8 @@ with create_tab:
                         f"General value (total z): you give {deal['gen_give']:+.2f}, "
                         f"you get {deal['gen_get']:+.2f}."
                     )
-                    ob1, ob2 = st.columns(2)
+                    ob1, ob2, ob3 = st.columns(3)
+                    save_button(ob3, f"offer-{k}", "Create a trade", deal_args(deal))
                     ob1.button(
                         "Load into mock trade",
                         key=f"offer-load-{k}",
@@ -1387,6 +1408,25 @@ def mock_three() -> None:
     per_game_totals(changes)
 
 
+with saved_tab:
+
+    def score_saved(trade):
+        """(your change in category wins, theirs or None), as Mock trade scores it."""
+        them = None if trade.is_waiver else trade.partner
+        if any(p not in players.index for p in trade.players()) or (
+            them is not None and them not in totals.index
+        ):
+            return None
+        _, mine_r, theirs_r = simulate_trade(
+            players, totals, me, them, list(trade.give), list(trade.get), list(trade.my_drop),
+            list(trade.their_drop), list(trade.my_add), list(trade.their_add), punts_me,
+            () if them is None else punts(weights[them]), analyzer.empty_slot(window),
+        )  # fmt: skip
+        return mine_r.delta_e, None if them is None else theirs_r.delta_e
+
+    saved_view.section(me, players, player_name.get, team_label, score_saved, "category wins",
+                       open_saved)  # fmt: skip
+
 with mock_tab:
     mock_teams = st.radio(
         "Teams in the deal", [2, 3], horizontal=True, key="mock-teams",
@@ -1495,6 +1535,8 @@ with mock_tab:
         punts_them,
         empty,
     )
+    save_button(st, "mock", "Mock trade",
+                (partner, give, get, my_drop, their_drop, my_add, their_add))  # fmt: skip
 
     # --- Suggest a pickup, for the roster this move leaves you ---
     def add_suggestion(add_id, drop_id) -> None:

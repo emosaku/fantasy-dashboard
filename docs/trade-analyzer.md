@@ -165,6 +165,24 @@ Below that, as before: every player in the deal with health and games-played his
 
 **Three-team deals** *(new)*. Set **Teams in the deal** to 3 and pick two partners. Three boxes follow the circle: *You send to Partner 1*, *Partner 1 sends to Partner 2*, *Partner 2 sends to you*. **Reverse direction** sends to Partner 2 first. Partners keep their rosters full automatically (their drops and free-agent adds are listed, not editable); your own adds, drops, roster count and Suggest a pickup work as above. Results come for all three teams (one tab each), with the step-by-step table, the ESPN plan and per-game totals. Load into mock trade on a three-team card fills all of it.
 
+## Saved trades *(new)*
+
+Keep the deals worth coming back to. **Save trade** sits beside **Load into mock trade**
+on every Waiver wire move, Trade finder deal and Create a trade deal (Search by player and
+Offer Builder), and under the result in Mock trade (two-team deals). The **Saved trades**
+tab holds them, for your team.
+
+- **Ranked best first** by what each one does for your team with today's data, scored
+  exactly as Mock trade would score it (category wins), with the partner's change beside
+  yours.
+- **Checked against today's rosters** every time the tab opens, so after each morning's
+  data load. A trade is removed, with a note saying why, once a player you'd send or drop
+  has left your team, a player you'd get or the partner would drop has left theirs, or a
+  free agent in it has been picked up.
+- **Saved once:** saving the same move again keeps one copy.
+- **Open in Mock trade** loads a saved trade back, adds and drops included; **Remove**
+  deletes it. Each manager's saved trades are their own.
+
 ## Limits and tips
 
 - **It models category wins, not people.** "Likely to work" means the deal helps their categories and looks fair by value. Their roster loyalty, playoff plans or hunches can still say no.

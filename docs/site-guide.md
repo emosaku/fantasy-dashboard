@@ -164,6 +164,13 @@ An empty roster spot counts as a player with no stats, not an average one, so a 
 
 Every recommendation row has **Load into mock trade** (same numbers there) and **Compare players** (opens Compare with everyone in the deal).
 
+### Saved trades
+
+**Save trade** on any Waiver wire, Trade finder, Create a trade or Mock trade deal keeps
+it here, ranked by what it does for your team with today's data. A saved trade is
+removed, with the reason, once roster changes make it impossible. Open it back in Mock
+trade, or remove it.
+
 ## Player Rankings
 
 Every player in the pool (all rostered players plus the top 100 free agents) ranked in each category and overall.
