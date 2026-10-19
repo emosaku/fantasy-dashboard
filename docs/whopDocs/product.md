@@ -1,6 +1,6 @@
 # LeagueLabWhop: from personal tool to product
 
-**Status: plan (October 18, 2026); GCP project created, setup blocked on billing.**
+**Status: plan (October 18, 2026); the GCP project is set up and running (section 1).**
 League Lab was built for 3-4 of Eni's own leagues: a sign-in allowlist, small caps
 and a $5 kill switch. Selling it on Whop means real signups, payment, support and a
 public face. This doc covers everything that isn't the data model
@@ -11,10 +11,11 @@ public face. This doc covers everything that isn't the data model
 | | |
 |---|---|
 | Project | `league-lab-whop` ("LeagueLabWhop", project number 239690658888) |
-| Billing | **Not linked yet.** "Eni's Billing" already has 5 linked projects, its limit |
+| Billing | "Eni's Billing". It allows 5 linked projects, so "My First Project" (`graphite-wave-466600-a1`, one empty bucket) was unlinked to make room |
+| Site | `league-lab`: https://league-lab-239690658888.us-west1.run.app (built from `WhopVersion`; sign-in not set up yet) |
 | Why separate | League Lab stays the personal tool. Paying customers' data, the public sign-in screen and the product's costs stay apart from it, and teardown of either never touches the other |
 
-**Copied from `league-lab-emk`** (once billing is linked), everything in
+**Copied from `league-lab-emk`** on October 18, everything in
 [phase0.md](../multiLeagueDocs/phase0.md) and [killswitch.md](../multiLeagueDocs/killswitch.md):
 region `us-west1`; Firestore native `(default)`; BigQuery dataset `league_lab` from
 `scripts/apply_sql.py` (now without the Draft tables); `ingest-sa`, `dashboard-sa`,
@@ -22,7 +23,19 @@ region `us-west1`; Firestore native `(default)`; BigQuery dataset `league_lab` f
 bindings; Cloud Run service `league-lab` and job `league-ingest` (2 tasks) built from
 `WhopVersion`; Scheduler `league-ingest-daily` (05:30 America/Phoenix); budget, Pub/Sub
 `budget-alerts`, the `killswitch` function, the 30 GiB/day BigQuery cap and the
-"ingest failed" email alert.
+"ingest failed" email alert ("LeagueLabWhop ingest failed").
+
+**Checked:** a manual `league-ingest` run succeeded on both tasks (no leagues yet); the
+site's health check returns 200; an under-budget test message reached the kill switch
+("Budget check: 1.1 of 5.0 -- under budget, nothing to do"). One step the docs didn't
+record: `killswitch-sa` needs `roles/run.invoker` on the `killswitch` service, because
+its Pub/Sub trigger runs as that account.
+
+**Still to do:** the sign-in client and secret `league-lab-auth` (section 2), created in
+the Cloud Console, then mounted with `gcloud run services update league-lab --region
+us-west1 --project league-lab-whop --update-secrets
+/root/.streamlit/secrets.toml=league-lab-auth:latest` after granting `dashboard-sa`
+Secret Accessor on it.
 
 **Not copied, on purpose:**
 
@@ -101,7 +114,7 @@ One short consult before charging anyone:
 
 ## Order of work
 
-0. **Unblock and check.** Link billing to `league-lab-whop` and finish the copy; confirm
+0. **Check.** Confirm
    Whop's OAuth and webhooks; pick the stats source; book the lawyer.
 1. **Data:** drop the outlook and build the projection model to its ship bar.
 2. **Accounts and payment:** sign-in, the webhook, the subscription gate, plan caps.
