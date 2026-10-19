@@ -103,29 +103,3 @@ def matchup_scores(league_id: int, version: str) -> pd.DataFrame:
 def pro_schedule(league_id: int, version: str) -> pd.DataFrame:
     """The NBA schedule mapped to the league's matchup weeks."""
     return _read("pro_schedule", league_id, version)
-
-
-# --- Draft Tool ---------------------------------------------------------------------------
-
-
-@st.cache_data(ttl=12 * 3600, max_entries=50, show_spinner=False)
-def history_average(player_ids: tuple, season: int) -> dict:
-    """Each player's average games over his last 3 seasons, from the games-played history
-    every league's data load shares (player_seasons isn't per league)."""
-    if not player_ids:
-        return {}
-    sql = (
-        f"SELECT player_id, AVG(games_played) AS games "
-        f"FROM `{settings.PROJECT}.{settings.DATASET}.player_seasons` "
-        "WHERE player_id IN UNNEST(@ids) AND history_season BETWEEN @first AND @last "
-        "AND games_played IS NOT NULL GROUP BY player_id"
-    )
-    config = bigquery.QueryJobConfig(
-        query_parameters=[
-            bigquery.ArrayQueryParameter("ids", "INT64", [int(i) for i in player_ids]),
-            bigquery.ScalarQueryParameter("first", "INT64", int(season) - 3),
-            bigquery.ScalarQueryParameter("last", "INT64", int(season) - 1),
-        ]
-    )
-    rows = _client().query(sql, job_config=config).result()
-    return {int(r.player_id): float(r.games) for r in rows}
