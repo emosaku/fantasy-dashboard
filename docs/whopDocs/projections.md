@@ -1,6 +1,7 @@
 # LeagueLabWhop: our own projection model
 
-**Status: plan (October 18, 2026).** The Whop version replaces ESPN's projections
+**Status: model built and tested on synthetic data (October 19, 2026); waiting on real
+data.** The Whop version replaces ESPN's projections
 with our own. Everything downstream (PAR, roster strength, trade values, projected
 standings) already runs on "a projected stat line per player", so the model replaces
 one input and the math above it stays as it is.
@@ -48,28 +49,32 @@ rows; rows per request, to time the 3-season backfill against 60 requests a minu
 
 ## The model
 
-A simple, explainable system in the style of baseball's Marcel:
+A simple, explainable system in the style of baseball's Marcel
+(`ingest/projections/model.py`):
 
-1. **Per-minute rates.** For each stat, the player's per-minute rate in each of the
-   last 3 seasons, weighted 5/4/3 toward the most recent season. Percentages come
-   from projecting makes and attempts separately, so FG% and FT% follow from them.
-2. **Regression to the mean.** Add a fixed amount of league-average minutes (a tuning
-   value; start around 1,000) to every player's history. A rookie or bench player with
-   little history lands near the average; a starter with 7,000 minutes barely moves.
-3. **Aging.** A multiplicative adjustment per stat by age, fit from the history itself
-   (how each age group's rates changed year over year). Expect gains into the mid-20s
-   and decline past about 30.
-4. **Minutes and games, separately.** Minutes per game from weighted recent minutes,
-   regressed toward the player's role. Games from his games-played history (the
-   ingest job already keeps 3 seasons of it in `player_seasons`), with a haircut for
-   injury history.
-5. **Line = rates x minutes x games.** Fantasy points then come from each league's own
-   point values (`computed_points` in `ingest/transform.py`), and categories from the
-   same line.
+1. **Aging first.** Each past season is moved to the player's age in the target
+   season, stat by stat, along an aging curve fit from the history itself: how each
+   age's per-minute rates changed the next season, for players with 500+ minutes in
+   both. Ages with few such players are pulled toward "no change". Players without a
+   birth date skip this step.
+2. **Per-minute rates.** For each stat, the last 3 seasons weighted 5/4/3 toward the
+   most recent (scaled so last season counts 1.0, so every prior below reads in
+   last-season terms). Makes and attempts are projected separately, so FG%, FT% and
+   3PT% follow from them.
+3. **Regression to the mean, fit per stat.** Every history gets some minutes of
+   league-average play added. How many is estimated from the data for each stat
+   (empirical Bayes): how much players' rates spread out, minus what chance alone
+   explains. Stable stats like shot attempts barely regress; noisy ones like steals and
+   blocks regress more. One overall multiplier is tuned by the backtest.
+4. **Minutes and games, separately.** Minutes per game lean harder on last season (6/3/1):
+   a role carries over more than per-minute production does. Both are pulled toward
+   a typical rotation player (18 minutes, 60 games), and games are capped at 82.
+5. **Line = rates x minutes, plus games.** Fantasy points come from each league's own
+   point values, and categories from the same line.
 
-**Known gaps in v1:** players who changed teams or roles (we add a small manual
-override table), and rookies with no NBA history (league-average-for-rookies, flagged
-as low confidence on the pages).
+**Known gaps in v1:** players who changed teams or roles (a small manual override
+table later), a season missed entirely to injury (no rows, so it isn't counted as zero
+games), and rookies with no NBA history (not projected yet).
 
 ## In season
 
@@ -98,24 +103,49 @@ updates nightly with the ingest run.
 
 ## Where it lives
 
-| Piece | Where |
-|---|---|
-| Stats source client and the 3-season backfill | `projections/source.py` *(new)* |
-| The model (rates, regression, aging, minutes, games) | `projections/model.py` *(new)* |
-| In-season blend | `projections/blend.py` *(new)* |
-| Backtest, runnable as a script | `projections/backtest.py`, `scripts/backtest_projections.py` *(new)* |
-| Output table | BigQuery `projections` (player_id, season, made_at, model_version, per-game line, minutes, games) |
-| Into the app | The ingest job writes our line into the `projected` stat window that the pages already read, in place of ESPN's |
-| Nightly run | A step in `league-ingest`, or its own small Cloud Run job if it outgrows it |
-| Tests | `tests/projections/` *(new)* |
+The code is in `ingest/projections/`, because the ingest job's image only packages
+`ingest/` and the nightly run belongs to that job.
+
+| Piece | Where | Status |
+|---|---|---|
+| Game rows -> season lines and the season / last 30 / 15 / 7 windows | `ingest/projections/games.py` | Built |
+| The model (aging, rates, regression, minutes, games) | `ingest/projections/model.py` | Built |
+| In-season blend | `ingest/projections/blend.py` | Built |
+| Backtest and tuning | `ingest/projections/backtest.py`, `scripts/backtest_projections.py` | Built |
+| Tables | `nba_player_games`, `nba_players`, `projections` (`sql/ddl/15-17`) | Created in `league-lab-whop`, empty |
+| BallDontLie client and the 3-season backfill | `ingest/projections/source.py` | Needs the API key |
+| Matching BallDontLie players to ESPN player ids | `nba_players.espn_player_id` | Needs the data (by name and team) |
+| Into the app | The ingest job writes our line into the `projected` window the pages already read | Phase 2 |
+| Tests | `tests/projections/` (26 tests) | Built |
+
+## Synthetic check (October 19)
+
+Until real data is loaded, the tests run on a synthetic league with known talent:
+500 players over 10 seasons with real-world-sized noise, talent and minutes that drift
+from year to year, and an aging curve (+4%/year to 26, flat to 30, -5%/year after).
+The model recovers the aging curve's shape, regresses steals and blocks more than
+shot attempts, and beats "repeat last season" in every test season:
+
+| Season | Fantasy pts/game error, model | Repeat last season | Rank correlation, top 150: model | Repeat last season |
+|---|---|---|---|---|
+| 2024 | 3.90 | 3.99 | 0.76 | 0.75 |
+| 2025 | 3.93 | 4.16 | 0.75 | 0.75 |
+| 2026 | 4.02 | 4.08 | 0.76 | 0.73 |
+
+That proves the machinery works, not that the model is good: only the real backtest
+can show that. Two lessons from building it, both now in the model: aging has to move
+each past season to the target age (aging only the last year left projections about a
+year and a half behind), and minutes need their own heavier recency weights.
+
 
 ## Phases
 
 0. **Source.** ALL-STAR chosen and ESPN's 2026-27 preseason projections saved
    (`espn_projection_snapshot`, 349 players, October 19). Left: the trial checks above,
    then the backfill and the per-game and window views.
-1. **Model and backtest.** Backfill, build the model, run the backtest and tune until it
-   meets the ship bar.
+1. **Model and backtest.** Model, blend, backtest and tuning built and tested on
+   synthetic data. Left: the backfill, then `scripts/backtest_projections.py --tune` on
+   real seasons until it meets the ship bar.
 2. **Into the app.** Swap the `projected` window to our model; check every page that
    reads it (Compare, Trade Analyzer, Roster Strength, Power Rankings' projected
    finish, the points pages).
