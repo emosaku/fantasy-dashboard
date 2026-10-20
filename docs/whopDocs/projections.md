@@ -42,10 +42,28 @@ data service, and neither applies to this product.
 No advanced stats (usage, PER, pace), team averages or standings: League Lab doesn't
 use them. The model needs one non-stat input, each player's birth date, for aging.
 
-**Check during the 48-hour trial** before paying: the players endpoint has birth
-dates; game rows have minutes and the team the player played for that night; how
-games a player missed appear (no row, or a 0-minute row); every scheduled game has
-rows; rows per request, to time the 3-season backfill against 60 requests a minute.
+**Checked against the live API (October 19, subscription bought):**
+
+| Check | Result |
+|---|---|
+| Birth dates | **Not in the API** (draft year only). Taken from Wikidata instead, below |
+| Minutes | Whole minutes as text ("30"); "00" for a game he didn't play |
+| Missed games | 0-minute rows, dropped before counting games played |
+| Team per game | Yes, the team he played for that night (trades handled) |
+| Regular season only | `season_type=regular` works; ~1,237 games a season |
+| Paging and rate | 100 rows a request, 60 requests a minute: ~6 minutes a season |
+
+The key is in Secret Manager in `league-lab-whop` (`balldontlie-api-key`), readable
+only by `ingest-sa`. Ten seasons (2016-17 to 2025-26) load into `nba_player_games`
+with `scripts/backfill_nba.py`.
+
+**Birth dates and ESPN ids: Wikidata.** Wikidata records both a birth date and an
+ESPN player id for nearly every NBA player (5,967 people), and its data is CC0,
+public domain, so the product can use it freely. `scripts/match_players.py` matches
+BallDontLie players to it by name (accents, punctuation and Jr./III ignored; shared
+names settled by draft year, otherwise left unmatched) and fills in `nba_players`.
+That one match gives the model its ages and links our projections to customers'
+ESPN rosters.
 
 ## The model
 
