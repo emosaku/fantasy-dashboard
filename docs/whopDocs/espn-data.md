@@ -17,10 +17,10 @@ This is a plan, not legal advice. The open questions are in
 | Transactions (adds, drops, trades) | The customer's league | Transactions | **Keep** |
 | League point values and categories | The customer's league | Every page | **Keep** |
 | Free agents list | The customer's league | Trade Analyzer, waivers | **Keep** |
-| Actual stats: season, last 30/15/7 days | ESPN's player data (facts) | Compare, Trade Analyzer, Roster Strength | **Keep for now.** Facts, but served by ESPN. Long term, compute from our own stats source |
-| Games played history (`player_seasons`) | ESPN's player data (facts) | Games projections | **Replace** with the stats source the projection model uses |
+| Actual stats: season, last 30/15/7 days | ESPN's player data (facts) | Compare, Trade Analyzer, Roster Strength | **Replace** with BallDontLie game stats (same 15 stats and windows, [projections.md](projections.md)) |
+| Games played history (`player_seasons`) | ESPN's player data (facts) | Games projections | **Replace** with BallDontLie game stats |
 | NBA schedule | ESPN (facts) | Points pages, projections | **Keep for now**, same reasoning as actual stats |
-| Injury status, expected return | ESPN (reported facts) | Health, Trade Analyzer filters | **Keep for now**; look for a second source later |
+| Injury status, expected return | ESPN (reported facts) | Health, Trade Analyzer filters | **Replace** with BallDontLie's injuries endpoint |
 | ESPN's fantasy points for actual stats (`appliedAverage`, source `espn`) | Arithmetic on facts | Points pages (cross-check) | **Keep**, or drop: we already compute the same numbers ourselves |
 | **Projected stat line** (`projected` window in `player_stats`) | **ESPN's forecast** | Compare, Trade Analyzer, Roster Strength, Power Rankings, points pages | **Replace** with [our projections](projections.md) |
 | **Projected fantasy points** (`projected` window in `player_points`) | **ESPN's forecast** | Points pages | **Replace**: our line x the league's point values |
@@ -39,8 +39,8 @@ This is a plan, not legal advice. The open questions are in
 4. **Wording.** No ESPN logos or look-alike branding; describe the product as "works
    with ESPN fantasy basketball leagues" plus a "not affiliated with ESPN" line (a
    lawyer question). Rename labels like "ESPN outlook".
-5. **Later:** compute the actual-stat windows and the schedule from our own stats
-   source, leaving ESPN as the source of league data only.
+5. **Actual stats, games history and injuries** from BallDontLie ALL-STAR, leaving ESPN
+   as the source of league data and the NBA schedule only.
 
 ## Public and private leagues
 

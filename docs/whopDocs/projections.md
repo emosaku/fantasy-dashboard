@@ -19,10 +19,32 @@ DREB), AST, STL, BLK, TO, 3PM/3PA, FGM/FGA, FTM/FTA, plus birth date. Season tot
 or per-game averages are enough for the preseason model. Game logs are only needed
 later, for in-season updates and "last 15 days" style views.
 
-**Source:** not ESPN, not stats.nba.com (unofficial, terms restrict commercial use) and
-not Basketball-Reference (its terms bar using its data in competing products). The
-first candidate is BallDontLie's paid tier, **after** reading its terms on commercial
-use and redistribution. Picking the source is phase 0 below.
+**Source: BallDontLie ALL-STAR** ($9.99/month or $95.90/year, NBA only; decided
+October 19, 2026). It serves per-game player stats, active players and injuries; we
+build everything else ourselves instead of paying for GOAT ($39.99/month) season
+averages and advanced stats. Its terms allow commercial use, storing and caching, with
+no attribution; they forbid reselling the raw data unmodified or running a competing
+data service, and neither applies to this product.
+
+**What we calculate: only what League Lab uses today**, nothing more:
+
+| What | Built from |
+|---|---|
+| Per-game PTS, REB, OREB, DREB, AST, STL, BLK, TO, 3PM, 3PA, FGM, FGA, FTM, FTA, MIN | Each player's game rows: total / games played |
+| GP | Count of games with minutes > 0 |
+| Windows `season`, `last_30`, `last_15`, `last_7` | The same, over games in that many days (ESPN's windows today) |
+| FG%, FT%, 3PT%, A/TO | Already computed from totals by the app (`ingest/catalog.py`), so nothing new |
+| Games played per past season (`player_seasons`) | Season's GP, for the last 3 seasons |
+| Injury status | ALL-STAR's injuries endpoint |
+| Projected line (`projected`) | The model below, from the rows above |
+
+No advanced stats (usage, PER, pace), team averages or standings: League Lab doesn't
+use them. The model needs one non-stat input, each player's birth date, for aging.
+
+**Check during the 48-hour trial** before paying: the players endpoint has birth
+dates; game rows have minutes and the team the player played for that night; how
+games a player missed appear (no row, or a 0-minute row); every scheduled game has
+rows; rows per request, to time the 3-season backfill against 60 requests a minute.
 
 ## The model
 
@@ -89,9 +111,9 @@ updates nightly with the ingest run.
 
 ## Phases
 
-0. **Source.** Read BallDontLie's (and any alternative's) terms, confirm the stats it
-   serves cover the list above, and time a 3-season backfill against its rate limit.
-   Snapshot ESPN's 2026-27 preseason projections for the benchmark.
+0. **Source.** ALL-STAR chosen and ESPN's 2026-27 preseason projections saved
+   (`espn_projection_snapshot`, 349 players, October 19). Left: the trial checks above,
+   then the backfill and the per-game and window views.
 1. **Model and backtest.** Backfill, build the model, run the backtest and tune until it
    meets the ship bar.
 2. **Into the app.** Swap the `projected` window to our model; check every page that
