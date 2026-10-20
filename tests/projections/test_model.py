@@ -59,6 +59,19 @@ def test_recent_seasons_count_more():
     assert rate == pytest.approx((5 * 0.6 + 4 * 0.4 + 3 * 0.3) / 12)
 
 
+def test_shot_volume_leans_harder_on_recent_seasons():
+    rows = [
+        season_row(1, 2024, 70, 2100, PTS=630, **{"3PA": 105}),  # 0.05 threes a minute
+        season_row(1, 2025, 70, 2100, PTS=630, **{"3PA": 105}),
+        season_row(1, 2026, 70, 2100, PTS=630, **{"3PA": 315}),  # 0.15: added range
+    ]
+    out = run(rows + background(), Params(regression_minutes=0.0))
+    pts_rate = out.at[1, "PTS"] / out.at[1, "MIN"]
+    threes_rate = out.at[1, "3PA"] / out.at[1, "MIN"]
+    assert pts_rate == pytest.approx(0.3)
+    assert threes_rate == pytest.approx((6 * 0.15 + 3 * 0.05 + 1 * 0.05) / 10)
+
+
 def test_seasons_outside_the_window_are_ignored():
     rows = [season_row(1, 2020, 70, 2100, PTS=4200), season_row(1, 2026, 70, 2100, PTS=1050)]
     out = run(rows + background(), Params(regression_minutes=0.0))

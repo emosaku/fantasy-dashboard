@@ -71,6 +71,7 @@ def main() -> None:
     parser.add_argument("--dataset", default="league_lab")
     parser.add_argument("--seasons", type=int, nargs="+", required=True)
     parser.add_argument("--tune", action="store_true")
+    parser.add_argument("--tune-on", type=int, nargs="+", help="tune on other seasons")
     parser.add_argument("--espn", action="store_true", help="score ESPN's projections too")
     args = parser.parse_args()
 
@@ -80,7 +81,7 @@ def main() -> None:
           f"{players['birth_date'].notna().sum()} birth dates")  # fmt: skip
     params = DEFAULT
     if args.tune:
-        params, table = tune(seasons, args.seasons, players)
+        params, table = tune(seasons, args.tune_on or args.seasons, players)
         print(table.head(10).to_string(index=False))
         print(f"best: {params}")
     others = {"espn": espn_projections(client, args.project, args.dataset)} if args.espn else None

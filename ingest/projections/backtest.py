@@ -101,9 +101,9 @@ def tune(
     """Tries every combination of the grid's Params values and returns the one with the
     lowest average `measure` across the test seasons, plus every result."""
     grid = grid or {
-        "regression_scale": [0.5, 1.0, 2.0],
-        "minutes_weights": [(6.0, 3.0, 1.0), (10.0, 2.0, 1.0), (5.0, 4.0, 3.0)],
-        "mpg_prior_games": [0.0, 10.0, 20.0],
+        "regression_scale": [1.0, 2.0, 3.0, 5.0],
+        "minutes_weights": [(6.0, 3.0, 1.0), (10.0, 2.0, 1.0), (1.0, 0.0, 0.0)],
+        "mpg_prior_games": [5.0, 10.0, 20.0],
     }
     keys = list(grid)
     results = []

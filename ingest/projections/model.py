@@ -8,15 +8,16 @@ games.py):
    stat by stat, along an aging curve fit from the history itself (fit_aging: how each
    age's rates changed the next season). Skipped for players without a birth date.
 2. Per-minute rates for every stat, the seasons weighted 5/4/3 toward the most recent
-   (scaled so last season counts 1.0). Makes and attempts are projected separately, so
-   FG%, FT% and 3PT% follow from them.
+   (scaled so last season counts 1.0); shot volume (3PA, 3PM, FTA, FTM) follows role
+   and range, so it leans harder on recent seasons (6/3/1). Makes and attempts are
+   projected separately, so FG%, FT% and 3PT% follow from them.
 3. Regression to the mean: every player's history gets some minutes of league-average
    play added, so a short history lands near the league rate and a long one barely
    moves. How many minutes is fit per stat (fit_regression): few for stable stats like
    shot attempts, more for noisy ones like steals and blocks.
 4. Minutes per game and games, each from the weighted history and regressed toward a
-   typical rotation player. Minutes weigh last season more heavily (6/3/1): a role
-   carries over more than per-minute production does.
+   typical rotation player. Minutes come from last season alone (tuned on real
+   seasons): a role carries over more than per-minute production does.
 5. The line: rate x minutes per game, plus projected games.
 
 Players with no history (rookies) aren't projected. Seasons are named by the year they
@@ -41,8 +42,13 @@ class Params:
     # season.
     weights: tuple = (5.0, 4.0, 3.0)
     # Minutes per game follow a player's role, which carries over more strongly than
-    # his per-minute production, so they lean harder on last season.
-    minutes_weights: tuple = (6.0, 3.0, 1.0)
+    # his per-minute production: tuned on real seasons (2021-22, 2022-23), last
+    # season's minutes alone did best.
+    minutes_weights: tuple = (1.0, 0.0, 0.0)
+    # Shot volume follows role and range like minutes do, so these stats lean on
+    # recent seasons too (fixed 3PA and 3PM in the 2022-23 and 2023-24 backtests)
+    volume_stats: tuple = ("3PA", "3PM", "FTA", "FTM")
+    volume_weights: tuple = (6.0, 3.0, 1.0)
     # League-average minutes added to every history: None fits them per stat
     # (fit_regression) and scales them by regression_scale; a number uses it for all.
     regression_minutes: float | None = None
@@ -196,6 +202,9 @@ def project(
     weighted["GP_m"] = hist["GP"] * hist["w_min"]
     weighted["player_id"] = hist["player_id"]
     sums = weighted.groupby("player_id").sum()
+    volume = list(params.volume_stats)
+    wv = hist["season"].map(_scaled(params.volume_weights, target))
+    volume_sums = hist[volume + ["MIN"]].mul(wv, axis=0).groupby(hist["player_id"]).sum()
 
     if params.regression_minutes is None:
         reg = fit_regression(seasons, target, params) * params.regression_scale
@@ -203,6 +212,10 @@ def project(
         reg = pd.Series(params.regression_minutes, index=RATE_STATS)
     rates = sums[RATE_STATS].add(league * reg, axis=1)
     rates = rates / np.add.outer(sums["MIN"].to_numpy(), reg.to_numpy())
+    volume_rates = volume_sums[volume].add(league[volume] * reg[volume], axis=1)
+    rates[volume] = volume_rates / np.add.outer(
+        volume_sums["MIN"].to_numpy(), reg[volume].to_numpy()
+    )
 
     mpg = (sums["MIN_m"] + params.mpg_prior * params.mpg_prior_games) / (
         sums["GP_m"] + params.mpg_prior_games

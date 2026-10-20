@@ -13,50 +13,111 @@ def test_names_lose_accents_punctuation_and_suffixes():
 
 
 def wiki(rows):
-    return pd.DataFrame(rows, columns=["espn_player_id", "birth_date", "name"])
+    """(espn id or None, birth date, name) -> Wikidata rows, one item each."""
+    frame = pd.DataFrame(
+        [
+            {"item": f"Q{i}", "espn_player_id": e, "birth_date": b, "name": n}
+            for i, (e, b, n) in enumerate(rows)
+        ],
+        columns=["item", "espn_player_id", "birth_date", "name"],
+    )
+    frame["espn_player_id"] = frame["espn_player_id"].astype("Int64")
+    return frame
 
 
-def test_a_unique_name_matches():
-    ours = pd.DataFrame([{"player_id": 1, "player_name": "Nikola Jokic", "draft_year": 2014}])
-    out = match(ours, wiki([(3112335, dt.date(1995, 2, 19), "Nikola Jokić")]))
-    assert out.to_dict("records") == [
+def ours(*rows):
+    return pd.DataFrame(rows, columns=["player_id", "player_name", "draft_year"])
+
+
+def records(out):
+    return [
+        {
+            "player_id": r.player_id,
+            "espn_player_id": None if pd.isna(r.espn_player_id) else int(r.espn_player_id),
+            "birth_date": None if pd.isna(r.birth_date) else r.birth_date,
+        }
+        for r in out.itertuples()
+    ]
+
+
+JOKIC = (3112335, dt.date(1995, 2, 19), "Nikola Jokić")
+
+
+def test_a_unique_name_gets_birth_date_and_espn_id():
+    out = match(ours((1, "Nikola Jokic", 2014)), wiki([JOKIC]))
+    assert records(out) == [
         {"player_id": 1, "espn_player_id": 3112335, "birth_date": dt.date(1995, 2, 19)}
     ]
 
 
 def test_a_shared_name_is_settled_by_draft_year():
-    ours = pd.DataFrame([{"player_id": 1, "player_name": "Marcus Williams", "draft_year": 2007}])
-    out = match(
-        ours,
-        wiki(
-            [
-                (100, dt.date(1985, 12, 3), "Marcus Williams"),  # drafted at 21: him
-                (200, dt.date(1960, 1, 1), "Marcus Williams"),  # would have been 47
-            ]
-        ),
-    )
-    assert out["espn_player_id"].tolist() == [100]
+    candidates = wiki([
+        (100, dt.date(1985, 12, 3), "Marcus Williams"),  # drafted at 21: him
+        (200, dt.date(1960, 1, 1), "Marcus Williams"),  # would have been 47
+    ])  # fmt: skip
+    out = match(ours((1, "Marcus Williams", 2007)), candidates)
+    assert records(out)[0]["espn_player_id"] == 100
 
 
 def test_an_unsettled_shared_name_is_left_unmatched():
-    ours = pd.DataFrame([{"player_id": 1, "player_name": "Chris Johnson", "draft_year": None}])
-    out = match(
-        ours,
-        wiki(
-            [
-                (100, dt.date(1985, 1, 1), "Chris Johnson"),
-                (200, dt.date(1990, 1, 1), "Chris Johnson"),
-            ]
-        ),
-    )
-    assert out.empty
+    candidates = wiki([
+        (100, dt.date(1985, 1, 1), "Chris Johnson"),
+        (200, dt.date(1990, 1, 1), "Chris Johnson"),
+    ])  # fmt: skip
+    assert match(ours((1, "Chris Johnson", None)), candidates).empty
+
+
+def test_espns_list_fills_a_missing_espn_id():
+    espn = pd.DataFrame([{"espn_player_id": 3202, "name": "Kevin Durant"}])
+    candidates = wiki([(None, dt.date(1988, 9, 29), "Kevin Durant")])
+    out = match(ours((1, "Kevin Durant", 2007)), candidates, espn)
+    assert records(out) == [
+        {"player_id": 1, "espn_player_id": 3202, "birth_date": dt.date(1988, 9, 29)}
+    ]
+
+
+def test_espns_list_alone_gives_an_id_without_a_birth_date():
+    espn = pd.DataFrame([{"espn_player_id": 77, "name": "New Guy"}])
+    out = match(ours((1, "New Guy", 2026)), wiki([]), espn)
+    assert records(out) == [{"player_id": 1, "espn_player_id": 77, "birth_date": None}]
 
 
 def test_one_espn_id_never_goes_to_two_players():
-    ours = pd.DataFrame(
-        [
-            {"player_id": 1, "player_name": "Same Name", "draft_year": 2010},
-            {"player_id": 2, "player_name": "Same Name", "draft_year": 2010},
-        ]
-    )
-    assert match(ours, wiki([(100, dt.date(1989, 1, 1), "Same Name")])).empty
+    candidates = wiki([(100, dt.date(1989, 1, 1), "Same Name")])
+    assert match(ours((1, "Same Name", 2010), (2, "Same Name", 2010)), candidates).empty
+
+
+def test_columns_already_on_the_players_table_are_ignored():
+    players = ours((1, "Nikola Jokic", 2014)).assign(birth_date=None, espn_player_id=None)
+    assert records(match(players, wiki([JOKIC])))[0]["espn_player_id"] == 3112335
+
+
+def test_spaced_initials_umlauts_and_suffixes_still_match():
+    candidates = wiki([
+        (1, dt.date(1992, 3, 25), "T. J. McConnell"),
+        (2, dt.date(1995, 10, 15), "Jakob Pöltl"),
+        (3, dt.date(1992, 7, 23), "Gary Payton II"),
+        (4, dt.date(1968, 7, 23), "Gary Payton"),
+    ])  # fmt: skip
+    players = ours((10, "T.J. McConnell", 2015), (11, "Jakob Poeltl", 2016),
+                   (12, "Gary Payton II", None), (13, "Gary Payton", 1990))  # fmt: skip
+    got = {r["player_id"]: r["espn_player_id"] for r in records(match(players, candidates))}
+    assert got == {10: 1, 11: 2, 12: 3, 13: 4}
+
+
+def test_short_first_names_and_nicknames_match():
+    candidates = wiki([
+        (1, dt.date(1999, 4, 17), "Nic Claxton"),
+        (2, dt.date(2005, 7, 21), "Bub Carrington"),
+    ])  # fmt: skip
+    players = ours((10, "Nicolas Claxton", 2019), (11, "Carlton Carrington", 2024))
+    got = {r["player_id"]: r["espn_player_id"] for r in records(match(players, candidates))}
+    assert got == {10: 1, 11: 2}
+
+
+def test_a_short_form_is_not_guessed_when_two_could_fit():
+    candidates = wiki([
+        (1, dt.date(1990, 1, 1), "Chris Smith"),
+        (2, dt.date(1991, 1, 1), "Christian Smith"),
+    ])  # fmt: skip
+    assert match(ours((10, "Chr Smith", None)), candidates).empty

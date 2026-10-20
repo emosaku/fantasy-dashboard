@@ -1,7 +1,7 @@
 # LeagueLabWhop: our own projection model
 
-**Status: model built and tested on synthetic data (October 19, 2026); waiting on real
-data.** The Whop version replaces ESPN's projections
+**Status: model built and backtested on 10 real seasons; it beats ESPN's projections
+(October 19, 2026). Next: into the app.** The Whop version replaces ESPN's projections
 with our own. Everything downstream (PAR, roster strength, trade values, projected
 standings) already runs on "a projected stat line per player", so the model replaces
 one input and the math above it stays as it is.
@@ -84,9 +84,11 @@ A simple, explainable system in the style of baseball's Marcel
    (empirical Bayes): how much players' rates spread out, minus what chance alone
    explains. Stable stats like shot attempts barely regress; noisy ones like steals and
    blocks regress more. One overall multiplier is tuned by the backtest.
-4. **Minutes and games, separately.** Minutes per game lean harder on last season (6/3/1):
-   a role carries over more than per-minute production does. Both are pulled toward
-   a typical rotation player (18 minutes, 60 games), and games are capped at 82.
+4. **Minutes and games, separately.** Minutes per game come from last season alone
+   (what tuning on real seasons chose): a role carries over more than per-minute
+   production does. Shot volume (3PA, 3PM, FTA, FTM) follows role and range too, so its
+   rates weigh recent seasons 6/3/1. Minutes and games are pulled toward a typical
+   rotation player (18 minutes, 60 games), and games are capped at 82.
 5. **Line = rates x minutes, plus games.** Fantasy points come from each league's own
    point values, and categories from the same line.
 
@@ -126,44 +128,79 @@ The code is in `ingest/projections/`, because the ingest job's image only packag
 
 | Piece | Where | Status |
 |---|---|---|
+| BallDontLie client (rate-limited, key in Secret Manager) | `ingest/projections/source.py` | Built |
+| Season backfill | `scripts/backfill_nba.py` | 10 seasons loaded: 2016-17 to 2025-26, 1,508 players |
+| Birth dates and ESPN ids | `ingest/projections/people.py`, `scripts/match_players.py` | 99.6% of minutes matched |
 | Game rows -> season lines and the season / last 30 / 15 / 7 windows | `ingest/projections/games.py` | Built |
-| The model (aging, rates, regression, minutes, games) | `ingest/projections/model.py` | Built |
+| The model | `ingest/projections/model.py` | Built, tuned |
 | In-season blend | `ingest/projections/blend.py` | Built |
 | Backtest and tuning | `ingest/projections/backtest.py`, `scripts/backtest_projections.py` | Built |
-| Tables | `nba_player_games`, `nba_players`, `projections` (`sql/ddl/15-17`) | Created in `league-lab-whop`, empty |
-| BallDontLie client and the 3-season backfill | `ingest/projections/source.py` | Needs the API key |
-| Matching BallDontLie players to ESPN player ids | `nba_players.espn_player_id` | Needs the data (by name and team) |
-| Into the app | The ingest job writes our line into the `projected` window the pages already read | Phase 2 |
-| Tests | `tests/projections/` (26 tests) | Built |
+| Tables | `nba_player_games`, `nba_players` (loaded), `projections` (empty) | `league-lab-whop` |
+| Into the app | The ingest job writes our line into the `projected` window the pages read | Phase 2 |
+| Nightly update of the current season | A step in `league-ingest` | Phase 3 |
+| Tests | `tests/projections/` (45 tests) | Built |
 
-## Synthetic check (October 19)
+## Matching players (October 19)
 
-Until real data is loaded, the tests run on a synthetic league with known talent:
-500 players over 10 seasons with real-world-sized noise, talent and minutes that drift
-from year to year, and an aging curve (+4%/year to 26, flat to 30, -5%/year after).
-The model recovers the aging curve's shape, regresses steals and blocks more than
-shot attempts, and beats "repeat last season" in every test season:
+BallDontLie's player list also holds other leagues' players (three "Luka Doncic"s,
+two of them Real Madrid records), so only players with NBA games are matched. Two
+lessons, both now in the matcher:
 
-| Season | Fantasy pts/game error, model | Repeat last season | Rank correlation, top 150: model | Repeat last season |
+- **Wikidata now keeps many people's names in a language-neutral "mul" label**, not
+  an English one. Querying English labels only silently dropped stars (Kevin Durant,
+  Jayson Tatum); the query falls back to "mul".
+- **Name variants need passes,** strictest first: "T. J." = "T.J.", suffixes dropped
+  (but tried kept first, so Gary Payton II isn't his father), umlauts spelled out
+  (Pöltl = Poeltl), short first names (Nic / Nicolas), and a short alias list for true
+  nicknames (Bub, Bones, Ace).
+
+Left unmatched on purpose (0.4% of minutes): two real players named Jaylin Williams,
+likewise Brandon Williams, and a few duplicate BallDontLie entries. 2026 rookies match
+once they play.
+
+## Real backtest (October 19)
+
+Tuned on 2021-22 and 2022-23 only, then scored on the three seasons after, so tuning
+doesn't flatter the scores. Players with 500+ minutes; ESPN's column covers the
+players in ESPN's own projection list (264 of them):
+
+| Season | Measure | Our model | Repeat last season | ESPN |
 |---|---|---|---|---|
-| 2024 | 3.90 | 3.99 | 0.76 | 0.75 |
-| 2025 | 3.93 | 4.16 | 0.75 | 0.75 |
-| 2026 | 4.02 | 4.08 | 0.76 | 0.73 |
+| 2023-24 | Fantasy pts/game error | **4.25** | 4.54 | |
+| 2024-25 | Fantasy pts/game error | **3.94** | 4.64 | |
+| 2025-26 | Fantasy pts/game error | **4.57** | 5.00 | 4.71 |
+| 2025-26 | Season fantasy points error | **487** | 559 | 520 |
+| 2025-26 | Ranking of the top 150 (rank correlation) | 0.745 | 0.721 | **0.776** |
 
-That proves the machinery works, not that the model is good: only the real backtest
-can show that. Two lessons from building it, both now in the model: aging has to move
-each past season to the target age (aging only the last year left projections about a
-year and a half behind), and minutes need their own heavier recency weights.
+- **Against "repeat last season":** better on every one of the 15 stats in 2023-24 and
+  2024-25; in 2025-26 on all but free throws (FTA error 0.803 vs 0.790).
+- **Against ESPN (2025-26):** 3% lower fantasy-points-per-game error and 6% lower
+  season-total error; better on 13 of 15 stats, behind on free throws (FTM, FTA). ESPN
+  ranks the top players a little better.
+- **The ship bar is met:** it beats the baseline on the main stats and is better than
+  ESPN, not just within 5% of it.
+- **Caveat:** whether ESPN's 2025-26 numbers (taken from the October 2026 snapshot) are
+  its preseason projections or a later revision isn't known; a revision would favor
+  ESPN, so our edge is if anything understated. The clean comparison is the 2026-27
+  preseason snapshot, scored as the season plays out.
 
+**What moved the numbers,** in order: aging each past season to the target age (the
+biggest gain, and what fixed the rankings), last season's minutes alone, per-stat
+regression, and 6/3/1 weights for shot volume (fixed three-pointers in 2022-23 and
+2023-24). Tried and dropped: rescaling past seasons to the latest league environment
+(no measurable effect).
+
+**On a synthetic league** (500 players with known talent), used to test the code
+before real data: the model recovers the aging curve and beats "repeat last season"
+every season. Building it showed that aging has to move every past season, not just
+the last one.
 
 ## Phases
 
-0. **Source.** ALL-STAR chosen and ESPN's 2026-27 preseason projections saved
-   (`espn_projection_snapshot`, 349 players, October 19). Left: the trial checks above,
-   then the backfill and the per-game and window views.
-1. **Model and backtest.** Model, blend, backtest and tuning built and tested on
-   synthetic data. Left: the backfill, then `scripts/backtest_projections.py --tune` on
-   real seasons until it meets the ship bar.
+0. **Source.** Done: ALL-STAR bought and checked, Wikidata for birth dates and ESPN
+   ids, ESPN's 2026-27 preseason projections saved (`espn_projection_snapshot`).
+1. **Model and backtest.** Done: 10 seasons loaded, players matched, tuned and
+   backtested; it meets the ship bar and beats ESPN.
 2. **Into the app.** Swap the `projected` window to our model; check every page that
    reads it (Compare, Trade Analyzer, Roster Strength, Power Rankings' projected
    finish, the points pages).
