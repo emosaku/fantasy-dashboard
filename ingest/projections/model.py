@@ -6,7 +6,8 @@ games.py):
 
 1. Aging: each past season is first moved to the player's age in the target season,
    stat by stat, along an aging curve fit from the history itself (fit_aging: how each
-   age's rates changed the next season). Skipped for players without a birth date.
+   age's rates changed the next season, each age pooled with its neighbors). Skipped
+   for players without a birth date.
 2. Per-minute rates for every stat, the seasons weighted 5/4/3 toward the most recent
    (scaled so last season counts 1.0); shot volume (3PA, 3PM, FTA, FTM) follows role
    and range, so it leans harder on recent seasons (6/3/1). Makes and attempts are
@@ -15,9 +16,9 @@ games.py):
    play added, so a short history lands near the league rate and a long one barely
    moves. How many minutes is fit per stat (fit_regression): few for stable stats like
    shot attempts, more for noisy ones like steals and blocks.
-4. Minutes per game and games, each from the weighted history and regressed toward a
-   typical rotation player. Minutes come from last season alone (tuned on real
-   seasons): a role carries over more than per-minute production does.
+4. Minutes per game from last season, pulled toward the player's own 3-season level
+   (so one injury-shortened season doesn't sink a star), and games from his history;
+   both pulled lightly toward a typical rotation player.
 5. The line: rate x minutes per game, plus projected games.
 
 Players with no history (rookies) aren't projected. Seasons are named by the year they
@@ -56,12 +57,18 @@ class Params:
     regression_bounds: tuple = (50.0, 20000.0)
     mpg_prior: float = 18.0  # a typical rotation player's minutes per game
     mpg_prior_games: float = 10.0  # how many games of mpg_prior the history gets
+    # Minutes are pulled toward the player's own level, not everyone's: his 3-season
+    # (5/4/3) minutes, themselves pulled toward mpg_prior by mpg_prior_games. Pulling
+    # everyone straight to mpg_prior (None) underprojected stars by ~4 fantasy points a
+    # game: an injury-shortened season (Giannis, 2025-26) dragged him toward 18 minutes.
+    own_level_games: float | None = 20.0
     games_prior: float = 60.0  # a typical season's games played
     games_prior_weight: float = 0.6  # in seasons (a full last season is 1.0)
     season_games: int = 82
     min_minutes: float = 500.0  # seasons with fewer don't fit aging or regression
     aging_shrink_pairs: float = 30.0  # pulls thin ages' aging toward no change
-    age_range: tuple = (19, 38)
+    aging_window: int = 5  # each age pooled with its neighbors (2 either side)
+    age_range: tuple = (19, 42)
 
 
 DEFAULT = Params()
@@ -132,7 +139,9 @@ def fit_aging(seasons: pd.DataFrame, players: pd.DataFrame | None, params: Param
         ok = (before > 0) & (after > 0)
         frame = pd.DataFrame({"age": ages[ok], "w": weight[ok]})
         frame["wc"] = frame["w"] * np.log(after[ok] / before[ok])
-        sums = frame.groupby("age")[["w", "wc"]].sum()
+        sums = frame.groupby("age")[["w", "wc"]].sum().reindex(range(lo, hi + 1), fill_value=0)
+        # pool each age with its neighbors: single ages are too noisy on their own
+        sums = sums.rolling(params.aging_window, center=True, min_periods=1).sum()
         typical = frame["w"].mean() if len(frame) else 1.0
         # weighted mean change, shrunk toward 0 by aging_shrink_pairs typical pairs
         out[stat] = sums["wc"] / (sums["w"] + params.aging_shrink_pairs * typical)
@@ -217,9 +226,17 @@ def project(
         volume_sums["MIN"].to_numpy(), reg[volume].to_numpy()
     )
 
-    mpg = (sums["MIN_m"] + params.mpg_prior * params.mpg_prior_games) / (
-        sums["GP_m"] + params.mpg_prior_games
-    )
+    if params.own_level_games is None:
+        mpg = (sums["MIN_m"] + params.mpg_prior * params.mpg_prior_games) / (
+            sums["GP_m"] + params.mpg_prior_games
+        )
+    else:
+        level = (sums["MIN"] + params.mpg_prior * params.mpg_prior_games) / (
+            sums["GP"] + params.mpg_prior_games
+        )
+        mpg = (sums["MIN_m"] + level * params.own_level_games) / (
+            sums["GP_m"] + params.own_level_games
+        )
     games = (sums["GP"] + params.games_prior * params.games_prior_weight) / (
         sums["w"] + params.games_prior_weight
     )

@@ -50,7 +50,7 @@ def players(league_id: int, version: str, window: str) -> pd.DataFrame:
 @st.cache_data(ttl=6 * 3600, max_entries=200, show_spinner=False)
 def stat_lines(league_id: int, version: str, window: str) -> pd.DataFrame:
     """Per-game stat lines, one row per player (index player_id). Blended uses season
-    averages once a player has them, ESPN's projection before."""
+    averages once a player has them, our projection before."""
     pool = queries.player_pool(league_id, version)
     if window == "blended":
         has_season = set(pool.loc[pool["stat_window"] == "season", "player_id"])

@@ -29,13 +29,10 @@ This is a plan, not legal advice. The open questions are in
 
 ## Work items
 
-1. **Drop the outlook.** Remove `season_outlook` from `transform_player_details`, the
-   `player_details` table and the two expanders (`app/views/1_Compare.py`,
-   `app/views/6_Trade_Analyzer.py`).
-2. **Swap the `projected` window** to our model's line (projections phase 2). Pages keep
-   reading the same window name, so the change is mostly in ingest.
-3. **Stop storing ESPN's projected numbers at all**, so nothing ESPN-authored sits in our
-   tables to leak into a page later.
+1. **Drop the outlook.** Done October 21 ([projections-in-app.md](projections-in-app.md)).
+2. **Swap the `projected` window** to our model's line. Done October 21.
+3. **Stop storing ESPN's projected numbers at all.** Done October 21: ESPN's
+   `_projected` window is no longer read.
 4. **Wording.** No ESPN logos or look-alike branding; describe the product as "works
    with ESPN fantasy basketball leagues" plus a "not affiliated with ESPN" line (a
    lawyer question). Rename labels like "ESPN outlook".

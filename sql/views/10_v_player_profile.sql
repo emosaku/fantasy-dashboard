@@ -1,4 +1,4 @@
--- Each pool player's health (ESPN status, return date, outlook) and durability:
+-- Each pool player's health (ESPN status, return date) and durability:
 -- average games played over the last 3 seasons he was in the NBA, and each season.
 CREATE OR REPLACE VIEW `{project}.{dataset}.v_player_profile` AS
 WITH history AS (
@@ -24,7 +24,6 @@ SELECT
   d.injured,
   d.injury_status,
   d.expected_return_date,
-  d.season_outlook,
   h.avg_games_played,
   h.seasons_counted,
   h.gp_last_season,

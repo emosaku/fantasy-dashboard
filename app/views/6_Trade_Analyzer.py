@@ -1010,21 +1010,12 @@ with mock_tab:
     st.caption(
         f"Per-game stats from: {analyzer.STAT_WINDOWS.get(window, window)}"
         + (
-            " (season averages once a player has them, else ESPN's projection)."
+            " (season averages once a player has them, else our projection)."
             if window == "blended"
             else "."
         )
         + " Health is ESPN's status; it doesn't give injury type."
     )
-    outlooks = [
-        (player_name[pid], profile.at[pid, "season_outlook"])
-        for pid, _ in moves
-        if pid in profile.index and pd.notna(profile.at[pid, "season_outlook"])
-    ]
-    if outlooks:
-        with st.expander("ESPN outlook for these players"):
-            for name, outlook in outlooks:
-                st.markdown(f"**{name}:** {outlook}")
 
     def side_report(team_id, result, team_overrides, team_punts) -> None:
         before_w = compute_weights(totals, team_id, delta, team_overrides)

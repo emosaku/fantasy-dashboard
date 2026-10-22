@@ -121,3 +121,18 @@ def test_a_short_form_is_not_guessed_when_two_could_fit():
         (2, dt.date(1991, 1, 1), "Christian Smith"),
     ])  # fmt: skip
     assert match(ours((10, "Chr Smith", None)), candidates).empty
+
+
+def test_a_father_is_never_taken_for_his_son():
+    candidates = wiki([
+        (1, dt.date(1956, 1, 16), "Gerald Henderson"),
+        (2, dt.date(1987, 12, 9), "Gerald Henderson Jr."),
+    ])  # fmt: skip
+    got = records(match(ours((10, "Gerald Henderson", 2009)), candidates))
+    assert got == [{"player_id": 10, "espn_player_id": 2, "birth_date": dt.date(1987, 12, 9)}]
+
+
+def test_undrafted_players_are_checked_against_their_first_season():
+    candidates = wiki([(1, dt.date(1961, 3, 6), "Ray McCallum")])
+    players = ours((10, "Ray McCallum", None)).assign(first_season=2014)
+    assert match(players, candidates).empty

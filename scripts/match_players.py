@@ -39,13 +39,16 @@ def main() -> None:
     table = f"{args.project}.{args.dataset}"
 
     players = bq.query(f"SELECT * FROM `{table}.nba_players`").to_dataframe()
-    nba = bq.query(f"SELECT DISTINCT player_id FROM `{table}.nba_player_games`").to_dataframe()[
-        "player_id"
-    ]
+    first = bq.query(
+        f"SELECT player_id, MIN(season) AS first_season FROM `{table}.nba_player_games` "
+        "GROUP BY player_id"
+    ).to_dataframe()
+    nba = first["player_id"]
     espn = pd.concat([fetch_espn_players(s) for s in ESPN_SEASONS]).drop_duplicates(
         "espn_player_id", keep="last"
     )
-    matched = match(players.loc[players["player_id"].isin(nba)], fetch_wikidata(), espn)
+    ours = players.merge(first, on="player_id")  # NBA players only, with their first season
+    matched = match(ours, fetch_wikidata(), espn)
     players = players.drop(columns=["birth_date", "espn_player_id"]).merge(
         matched, on="player_id", how="left"
     )

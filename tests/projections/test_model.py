@@ -95,9 +95,22 @@ def test_games_regress_toward_a_typical_season_and_never_pass_82():
 
 
 def test_minutes_regress_toward_a_rotation_player():
-    params = Params(regression_minutes=1000.0, mpg_prior=18.0, mpg_prior_games=20.0)
+    params = Params(regression_minutes=1000.0, mpg_prior=18.0, mpg_prior_games=20.0,
+                    own_level_games=None)  # fmt: skip
     out = run([season_row(1, 2026, 4, 160)] + background(), params)
     assert out.at[1, "MIN"] == pytest.approx((160 + 18 * 20) / (4 + 20))
+
+
+def test_an_injury_shortened_season_is_pulled_toward_his_own_level():
+    star = [
+        season_row(1, 2024, 73, 73 * 35.0, PTS=73 * 30),
+        season_row(1, 2025, 67, 67 * 34.0, PTS=67 * 30),
+        season_row(1, 2026, 36, 36 * 29.0, PTS=36 * 28),  # hurt: 36 games, 29 minutes
+    ]
+    own = run(star + background(), Params(regression_minutes=1000.0))
+    everyone = run(star + background(), Params(regression_minutes=1000.0, own_level_games=None))
+    assert own.at[1, "MIN"] > 30.0 > everyone.at[1, "MIN"]
+    assert own.at[1, "MIN"] < 34.0  # still closer to last season than a full rebound
 
 
 def test_players_without_history_are_not_projected():

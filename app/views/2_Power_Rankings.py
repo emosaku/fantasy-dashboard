@@ -128,7 +128,7 @@ else:
         how = f"No weeks are finished yet, so all {last_week} are projected"
     st.caption(
         f"{how} from today's rosters: each available player's per-game averages (his "
-        "season averages, or ESPN's projection until he's played), compared team against "
+        "season averages, or our projection until he's played), compared team against "
         f"team on the league's {len(ctx.cats)} categories, week by week as injured players "
         "return."
         + (" Records count categories, as Each Category scores." if ctx.each_category else "")

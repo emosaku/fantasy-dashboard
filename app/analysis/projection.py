@@ -6,7 +6,7 @@ happened: the team's real all-play record from v_all_play. Every remaining week,
 the current one included, is projected on its own from today's rosters:
 
   * each player contributes his per-game line -- season averages once he has them,
-    ESPN's projection until then -- but only in weeks he's expected to be available;
+    our projection until then -- but only in weeks he's expected to be available;
   * a team's line is its available players' stats summed, ratio categories
     recomputed from the two totals; teams are then compared all-play on the league's
     own categories (lower-is-better ones flipped). A Most Categories league scores a
@@ -46,7 +46,7 @@ class InjuryRules:
 
 def per_game_lines(pool: pd.DataFrame) -> pd.DataFrame:
     """One per-game line per rostered player from v_player_pool (long): season
-    averages if he has them, else ESPN's projection. Wide: a column per stat."""
+    averages if he has them, else our projection. Wide: a column per stat."""
     rostered = pool.loc[pool["team_id"].notna() & pool["stat_window"].isin(["season", "projected"])]
     has_season = set(rostered.loc[rostered["stat_window"] == "season", "player_id"])
     chosen = rostered.loc[

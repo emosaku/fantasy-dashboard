@@ -22,6 +22,8 @@ from ingest.transform import (
     transform_player_seasons,
     transform_player_stats,
     transform_pro_schedule,
+    transform_projected_points,
+    transform_projected_stats,
     transform_rosters,
     transform_teams,
     transform_transactions,
@@ -122,17 +124,17 @@ def test_matchup_categories_skip_bye_weeks():
     assert transform_matchup_categories(league, [1], LEAGUE, SEASON, AT).empty
 
 
-def test_player_stats_are_long_and_skip_unfilled_windows():
-    # Preseason: only "_projected" has an "avg" dict yet.
+def test_player_stats_are_long_and_skip_unfilled_windows_and_espns_projection():
     player = make_player(
         99,
         {
-            f"{SEASON}_last_7": {"applied_total": 0},
-            f"{SEASON}_projected": {"avg": {"PTS": 20.0, "TO": 2.0, "3PA": 6.0, "XYZ": 1.0}},
+            f"{SEASON}_last_7": {"applied_total": 0},  # no "avg" yet: skipped
+            f"{SEASON}_total": {"avg": {"PTS": 20.0, "TO": 2.0, "3PA": 6.0, "XYZ": 1.0}},
+            f"{SEASON}_projected": {"avg": {"PTS": 99.0}},  # ESPN's content: never kept
         },
     )
     df = transform_player_stats([player, player], LEAGUE, SEASON, AT)  # repeat ignored
-    assert set(df["stat_window"]) == {"projected"}
+    assert set(df["stat_window"]) == {"season"}
     assert dict(zip(df["stat"], df["value"], strict=True)) == {"3PA": 6.0, "PTS": 20.0, "TO": 2.0}
 
 
@@ -206,7 +208,7 @@ def test_player_seasons_record_null_for_players_without_a_line():
     assert (df["history_season"] == 2026).all()
 
 
-def test_player_details_keep_injury_fields_and_outlook():
+def test_player_details_keep_injury_fields_but_not_espns_outlook():
     records = [
         {"id": 1, "injured": True, "injuryStatus": "OUT", "expectedReturnDate": [2026, 11, 20],
          "seasonOutlook": "Missed time last year with a knee issue."},
@@ -215,7 +217,7 @@ def test_player_details_keep_injury_fields_and_outlook():
     df = transform_player_details(records, LEAGUE, SEASON, AT).set_index("player_id")
     assert df.loc[1, "expected_return_date"] == dt.date(2026, 11, 20)
     assert pd.isna(df.loc[2, "expected_return_date"])
-    assert pd.isna(df.loc[2, "season_outlook"])
+    assert "season_outlook" not in df
 
 
 # --- Points leagues -----------------------------------------------------------------
@@ -229,14 +231,17 @@ def test_player_points_prefer_espns_numbers_and_keep_ours_beside_them():
             "avg": {"PTS": 20.0, "FGA": 12.0, "REB": 8.0}, "total": {"GP": 10.0}}  # fmt: skip
     preseason = {"applied_avg": 0, "applied_total": 0, "avg": {"PTS": 10.0, "FGA": 8.0}}
     player = make_player(7, {f"{SEASON}_total": espn, f"{SEASON}_projected": preseason})
+    last7 = {"applied_avg": 0, "applied_total": 0, "avg": {"PTS": 10.0, "FGA": 8.0}}
+    player.stats[f"{SEASON}_last_7"] = last7
     df = transform_player_points([player, player], SCORING, LEAGUE, SEASON, AT)
     rows = df.set_index("stat_window")
-    assert len(df) == 2  # a repeated player isn't loaded twice
+    assert len(df) == 2  # a repeated player isn't loaded twice; ESPN's projection never
+    assert "projected" not in rows.index
     assert rows.at["season", "fp_per_game"] == 18.0 and rows.at["season", "source"] == "espn"
     assert rows.at["season", "computed_per_game"] == 16.0 and rows.at["season", "games"] == 10
     # ESPN sent 0: our stat x points is used instead.
-    assert rows.at["projected", "fp_per_game"] == 2.0
-    assert rows.at["projected", "source"] == "computed"
+    assert rows.at["last_7", "fp_per_game"] == 2.0
+    assert rows.at["last_7", "source"] == "computed"
     off = points_mismatches(df)
     assert list(off["stat_window"]) == ["season"]  # 18 vs 16: more than 0.1 apart
 
@@ -303,3 +308,36 @@ def test_rosters_and_free_agents_carry_team_and_eligible_slots():
     assert (
         transform_free_agents([player], LEAGUE, SEASON, AT).iloc[0]["eligible_slots"] == "PG,G,UT"
     )
+
+
+# --- Our projections ------------------------------------------------------------------
+
+
+def our_lines():
+    """Per-game lines by ESPN player id, as projections.latest returns them."""
+    lines = pd.DataFrame(
+        [{"espn_player_id": 7, "PTS": 20.0, "FGA": 15.0, "REB": 6.0, "GP": 70.0},
+         {"espn_player_id": 8, "PTS": 10.0, "FGA": 8.0, "REB": 3.0, "GP": 60.0}]
+    )  # fmt: skip
+    return lines.set_index("espn_player_id")
+
+
+def test_our_projections_fill_the_projected_window_for_pool_players_only():
+    df = transform_projected_stats(our_lines(), [7, 99], LEAGUE, SEASON, AT, ["PTS", "GP", "AST"])
+    assert set(df["player_id"]) == {7}  # 8 isn't in the pool; 99 has no projection
+    assert (df["stat_window"] == "projected").all()
+    assert dict(zip(df["stat"], df["value"], strict=True)) == {"PTS": 20.0, "GP": 70.0}
+
+
+def test_our_projected_points_use_the_leagues_values():
+    df = transform_projected_points(our_lines(), [7, 8], SCORING, LEAGUE, SEASON, AT)
+    rows = df.set_index("player_id")
+    assert rows.at[7, "fp_per_game"] == 20.0 - 15.0 + 6.0
+    assert rows.at[7, "fp_total"] == 11.0 * 70 and rows.at[7, "games"] == 70
+    assert (rows["source"] == "computed").all() and (rows["stat_window"] == "projected").all()
+
+
+def test_no_projections_yet_adds_nothing():
+    empty = pd.DataFrame(columns=["PTS", "GP"])
+    assert transform_projected_stats(empty, [7], LEAGUE, SEASON, AT).empty
+    assert transform_projected_points(None, [7], SCORING, LEAGUE, SEASON, AT).empty

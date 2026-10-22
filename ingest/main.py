@@ -31,6 +31,7 @@ import random
 import sys
 import time
 
+import pandas as pd
 from google.cloud import bigquery
 
 from ingest import registry
@@ -55,6 +56,7 @@ from ingest.espn_client import (
     polite,
 )
 from ingest.materialize import MATERIALIZED_VIEWS, refresh_statements, table_for
+from ingest.projections import run as projections
 from ingest.transform import (
     bench_slots,
     lineup_slots,
@@ -70,6 +72,8 @@ from ingest.transform import (
     transform_player_seasons,
     transform_player_stats,
     transform_pro_schedule,
+    transform_projected_points,
+    transform_projected_stats,
     transform_rosters,
     transform_teams,
     transform_transactions,
@@ -121,8 +125,12 @@ def missing_history(client, cfg, player_ids) -> dict[int, list[int]]:
     return {s: [p for p in player_ids if (p, s) not in have] for s in seasons}
 
 
-def ingest_league(league_doc: dict, client, db, cfg: Config, now: dt.datetime) -> dict:
-    """Refresh one league; returns the registry fields to record."""
+def ingest_league(
+    league_doc: dict, client, db, cfg: Config, now: dt.datetime, projected=None
+) -> dict:
+    """Refresh one league; returns the registry fields to record. `projected`: our
+    projections by ESPN player id (projections.latest), written as the "projected"
+    window in place of ESPN's."""
     league_id = league_doc["league_id"]
     season = int(league_doc.get("season") or cfg.season)
     cookies = cookies_for(league_doc, cfg.project)
@@ -195,7 +203,8 @@ def ingest_league(league_doc: dict, client, db, cfg: Config, now: dt.datetime) -
         player_points = transform_player_points(
             rostered + free_agents, scoring, league_id, season, now
         )
-        load("player_points", player_points)
+        ours = transform_projected_points(projected, pool_ids, scoring, league_id, season, now)
+        load("player_points", pd.concat([player_points, ours], ignore_index=True))
         off = points_mismatches(player_points)
         points_check = {"checked": int((player_points["source"] == "espn").sum()),
                         "mismatched": int(len(off))}  # fmt: skip
@@ -213,7 +222,13 @@ def ingest_league(league_doc: dict, client, db, cfg: Config, now: dt.datetime) -
     load("free_agents", transform_free_agents(free_agents, league_id, season, now))
     load(
         "player_stats",
-        transform_player_stats(rostered + free_agents, league_id, season, now, stats),
+        pd.concat(
+            [
+                transform_player_stats(rostered + free_agents, league_id, season, now, stats),
+                transform_projected_stats(projected, pool_ids, league_id, season, now, stats),
+            ],
+            ignore_index=True,
+        ),
     )
     load("player_details", transform_player_details(details, league_id, season, now))
     names = {p.playerId: p.name for p in rostered + free_agents} | dict(league.player_map)
@@ -297,13 +312,18 @@ def main(env=os.environ) -> int:
         registry.leagues_to_refresh(db, now, cfg.only_ids), cfg.task_index, cfg.task_count
     )
     print(f"task {cfg.task_index}/{cfg.task_count}: {len(leagues)} league(s)")
+    projected = (
+        projections.latest(client, cfg.project, cfg.dataset, cfg.season) if leagues else None
+    )
+    if leagues:
+        print(f"our projections: {len(projected)} players")
     done, failed = [], []
     for position, league_doc in enumerate(leagues):
         if position:
             time.sleep(random.uniform(*STAGGER_SECONDS))  # spread load on ESPN
         league_id = league_doc["league_id"]
         try:
-            fields = ingest_league(league_doc, client, db, cfg, now)
+            fields = ingest_league(league_doc, client, db, cfg, now, projected)
             registry.record_success(db, league_id, fields)
             done.append(league_id)
             print(f"league {league_id}: ok")

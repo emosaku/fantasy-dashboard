@@ -28,7 +28,7 @@ def window_picker(ctx, where=st, key: str = "points-window") -> str:
         windows,
         format_func=model.WINDOWS.get,
         key=key,
-        help="Blended mixes ESPN's projection with season stats as games are played: "
+        help="Blended mixes our projection with season stats as games are played: "
         "season FP/G counts fully from 20 games.",
     )
 

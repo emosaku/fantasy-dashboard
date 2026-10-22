@@ -17,8 +17,10 @@ unmatched: the exact name (accents, punctuation and spaces ignored, so "T. J." i
 the same last name; a short alias list covers true nicknames (Bub, Bones, Ace). When
 two candidates share a name, the one whose birth year fits the BallDontLie player's
 draft year (drafted at 17-25) wins; if that doesn't settle it, the player is left
-unmatched rather than guessed. Only players with NBA games should be passed in:
-BallDontLie's player list also holds other leagues' players with the same names.
+unmatched rather than guessed. And in every pass, a candidate whose birth date can't
+be our player's is never taken, even alone (Gerald Henderson Sr. for his son). Only
+players with NBA games should be passed in: BallDontLie's player list also holds other
+leagues' players with the same names.
 """
 
 import json
@@ -90,10 +92,27 @@ def fetch_espn_players(season: int) -> pd.DataFrame:
     ).drop_duplicates("espn_player_id")
 
 
+FIRST_SEASON_AGES = (18, 40)  # age in his first NBA season, for undrafted players
+
+
 def _fits(draft_year, birth_date) -> bool:
     if pd.isna(draft_year) or birth_date is None or pd.isna(birth_date):
         return False
     return DRAFT_AGES[0] <= int(draft_year) - birth_date.year <= DRAFT_AGES[1]
+
+
+def _impossible(row) -> bool:
+    """A candidate whose birth date can't be our player's (his father, say): drafted
+    outside 17-25, or outside 18-40 in his first NBA season. Unknown = possible."""
+    born = row.get("birth_date")
+    if born is None or pd.isna(born):
+        return False
+    if pd.notna(row.get("draft_year")):
+        return not _fits(row["draft_year"], born)
+    first = row.get("first_season")
+    if first is not None and pd.notna(first):
+        return not FIRST_SEASON_AGES[0] <= int(first) - born.year <= FIRST_SEASON_AGES[1]
+    return False
 
 
 # Nicknames no rule can derive: BallDontLie's name -> the name others use
@@ -153,6 +172,10 @@ def _settle(pairs: pd.DataFrame, key: str) -> pd.DataFrame:
     draft year when candidates carry a birth date) and each candidate one player."""
     if pairs.empty:
         return pairs
+    if "birth_date" in pairs:
+        pairs = pairs.loc[[not _impossible(r) for _, r in pairs.iterrows()]]
+        if pairs.empty:
+            return pairs
     counts = pairs.groupby("player_id")[key].transform("size")
     many = pairs.loc[counts > 1]
     if "birth_date" in many and not many.empty:
@@ -184,10 +207,14 @@ def _by_name(ours: pd.DataFrame, theirs: pd.DataFrame, key: str) -> pd.DataFrame
 
 
 def match(players: pd.DataFrame, wikidata: pd.DataFrame, espn: pd.DataFrame | None = None):
-    """players: BallDontLie's (player_id, player_name, draft_year), NBA players only.
-    Returns one row per player matched to anything: player_id, espn_player_id,
-    birth_date (either may be missing)."""
-    ours = players[["player_id", "player_name", "draft_year"]]
+    """players: BallDontLie's (player_id, player_name, draft_year, and optionally
+    first_season: his first NBA season, end year), NBA players only. Returns one row
+    per player matched to anything: player_id, espn_player_id, birth_date (either may
+    be missing)."""
+    keep = ["player_id", "player_name", "draft_year"] + (
+        ["first_season"] if "first_season" in players else []
+    )
+    ours = players[keep]
     wiki = _by_name(ours, wikidata, "item")
     out = ours[["player_id"]].merge(
         wiki[["player_id", "espn_player_id", "birth_date"]], on="player_id", how="left"

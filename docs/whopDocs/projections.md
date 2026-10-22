@@ -1,7 +1,7 @@
 # LeagueLabWhop: our own projection model
 
-**Status: model built and backtested on 10 real seasons; it beats ESPN's projections
-(October 19, 2026). Next: into the app.** The Whop version replaces ESPN's projections
+**Status: model live in `league-lab-whop`'s pages (October 21, 2026); it beats ESPN's
+projections on the backtest. Next: the nightly in-season update.** The Whop version replaces ESPN's projections
 with our own. Everything downstream (PAR, roster strength, trade values, projected
 standings) already runs on "a projected stat line per player", so the model replaces
 one input and the math above it stays as it is.
@@ -201,8 +201,8 @@ the last one.
    ids, ESPN's 2026-27 preseason projections saved (`espn_projection_snapshot`).
 1. **Model and backtest.** Done: 10 seasons loaded, players matched, tuned and
    backtested; it meets the ship bar and beats ESPN.
-2. **Into the app.** Swap the `projected` window to our model; check every page that
-   reads it (Compare, Trade Analyzer, Roster Strength, Power Rankings' projected
-   finish, the points pages).
+2. **Into the app.** Done and deployed October 21
+   ([projections-in-app.md](projections-in-app.md)), with three fixes found on the way:
+   fathers' birth dates, no aging past 38, and stars' minutes.
 3. **In season.** The nightly blend.
 4. **Show the work.** A "How our projections work" page: a selling point, and honest.

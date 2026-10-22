@@ -62,7 +62,7 @@ def fp_wide(points: pd.DataFrame) -> pd.DataFrame:
 
 
 def blend(season: pd.Series, projected: pd.Series, season_games: pd.Series) -> pd.Series:
-    """Season FP/G and ESPN's projection mixed by games played: alpha = min(GP/20, 1).
+    """Season FP/G and our projection mixed by games played: alpha = min(GP/20, 1).
     Whichever one a player is missing, the other is used alone."""
     alpha = (season_games.fillna(0) / BLEND_GAMES).clip(upper=1.0)
     mixed = alpha * season + (1 - alpha) * projected

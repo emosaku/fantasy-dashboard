@@ -12,14 +12,16 @@ from espn_api.basketball.constant import ACTIVITY_MAP, POSITION_MAP, PRO_TEAM_MA
 
 from ingest.catalog import PLAYER_STATS, scoring_type
 
-# ESPN's stat-window keys -> this project's stat_window.
+# ESPN's stat-window keys -> this project's stat_window. ESPN's own projections
+# ("_projected") are ESPN's content and aren't kept: the "projected" window is ours
+# (ingest/projections; transform_projected_stats and transform_projected_points).
 WINDOW_SUFFIXES = {
     "_total": "season",
     "_last_30": "last_30",
     "_last_15": "last_15",
     "_last_7": "last_7",
-    "_projected": "projected",
 }
+PROJECTED = "projected"
 GAMES_PLAYED_STAT = "42"
 NOT_STARTING = {"BE", "IR", "Rookie", ""}  # eligibleSlots that aren't lineup spots
 POINTS_TOLERANCE = 0.1  # our stat x points vs ESPN's applied average, per game
@@ -230,7 +232,6 @@ def transform_player_details(records, league_id, season, ingested_at):
                 "injured": record.get("injured"),
                 "injury_status": record.get("injuryStatus"),
                 "expected_return_date": dt.date(*returns[:3]) if returns else None,
-                "season_outlook": record.get("seasonOutlook") or None,
             }
         )
     return pd.DataFrame(rows)
@@ -335,6 +336,58 @@ def transform_player_points(players, scoring, league_id, season, ingested_at):
                     "source": source,
                 }
             )
+    return pd.DataFrame(rows)
+
+
+def _projected_pool(lines: pd.DataFrame, player_ids) -> pd.DataFrame:
+    """Our projected lines (indexed by ESPN player id) for the league's pool players."""
+    if lines is None or lines.empty:
+        return pd.DataFrame()
+    return lines.loc[lines.index.intersection(pd.Index(player_ids, dtype="int64"))]
+
+
+def transform_projected_stats(lines, player_ids, league_id, season, ingested_at,
+                              stats=PLAYER_STATS):  # fmt: skip
+    """Our projections as the "projected" window, in transform_player_stats' shape: one
+    row per pool player we project x stat. lines: per-game lines by ESPN player id
+    (ingest/projections/run.py's latest), GP = projected games."""
+    rows = []
+    for player_id, line in _projected_pool(lines, player_ids).iterrows():
+        for stat in stats:
+            value = line.get(stat)
+            if value is not None and pd.notna(value):
+                rows.append(
+                    {
+                        **_base(league_id, season, ingested_at),
+                        "player_id": int(player_id),
+                        "stat_window": PROJECTED,
+                        "stat": stat,
+                        "value": float(value),
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def transform_projected_points(lines, player_ids, scoring, league_id, season, ingested_at):
+    """Our projections as the "projected" window of player_points: the league's point
+    values times our per-game line (stats the line doesn't carry count 0)."""
+    rows = []
+    for player_id, line in _projected_pool(lines, player_ids).iterrows():
+        avg = {k: v for k, v in line.items() if pd.notna(v)}
+        fp = computed_points(avg, scoring)
+        games = avg.get("GP")
+        rows.append(
+            {
+                **_base(league_id, season, ingested_at),
+                "player_id": int(player_id),
+                "stat_window": PROJECTED,
+                "fp_per_game": float(fp),
+                "fp_total": float(fp * games) if games else None,
+                "games": float(games) if games else None,
+                "computed_per_game": float(fp),
+                "source": "computed",
+            }
+        )
     return pd.DataFrame(rows)
 
 

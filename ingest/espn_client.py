@@ -112,7 +112,7 @@ def fetch_player_info(
     cookies: dict | None = None,
     batch_size: int = 100,
 ) -> list[dict]:
-    """Raw ESPN player records (injury fields, outlook, season-total actual stats) for
+    """Raw ESPN player records (injury fields, season-total actual stats) for
     these players in one season -- any past season too, via that season's league."""
     url = LEAGUE_URL.format(season=season, league_id=league_id)
     records = []

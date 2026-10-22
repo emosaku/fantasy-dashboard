@@ -27,22 +27,12 @@ from google.cloud import bigquery
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from ingest.projections.backtest import backtest, tune  # noqa: E402
-from ingest.projections.games import COLUMNS, STATS, from_columns, season_lines  # noqa: E402
+from ingest.projections.games import STATS  # noqa: E402
 from ingest.projections.model import DEFAULT  # noqa: E402
+from ingest.projections.run import load_history  # noqa: E402
 
 SHOWN = ["season", "method", "players", "mae_fpg", "mae_fp", "rank_corr", "mae_MIN",
          "mae_PTS", "mae_REB", "mae_AST"]  # fmt: skip
-
-
-def load(client: bigquery.Client, project: str, dataset: str):
-    stats = ", ".join(COLUMNS[s] for s in STATS)
-    games = client.query(
-        f"SELECT player_id, season, game_date, {stats} FROM `{project}.{dataset}.nba_player_games`"
-    ).to_dataframe()
-    players = client.query(
-        f"SELECT player_id, birth_date FROM `{project}.{dataset}.nba_players`"
-    ).to_dataframe()
-    return season_lines(from_columns(games)), players
 
 
 def espn_projections(client: bigquery.Client, project: str, dataset: str) -> dict:
@@ -76,7 +66,7 @@ def main() -> None:
     args = parser.parse_args()
 
     client = bigquery.Client(project=args.project)
-    seasons, players = load(client, args.project, args.dataset)
+    seasons, players = load_history(client, args.project, args.dataset)
     print(f"{len(seasons)} player-seasons, {seasons['season'].nunique()} seasons, "
           f"{players['birth_date'].notna().sum()} birth dates")  # fmt: skip
     params = DEFAULT

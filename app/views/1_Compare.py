@@ -617,12 +617,3 @@ else:  # Players
         hide_index=True,
         width="stretch",
     )
-    outlooks = [
-        (pname[pid], profile.at[pid, "season_outlook"])
-        for pid in picked
-        if pid in profile.index and pd.notna(profile.at[pid, "season_outlook"])
-    ]
-    if outlooks:
-        with st.expander("ESPN outlook for these players"):
-            for name, outlook in outlooks:
-                st.markdown(f"**{name}:** {outlook}")
