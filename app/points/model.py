@@ -3,8 +3,8 @@
 In a head-to-head points league one number decides each week: the team that scores
 more fantasy points wins. So:
 
-  * A player's value is his **fantasy points per game (FP/G)** -- ESPN's own number
-    for the league's scoring -- and his **points above replacement (PAR)**: FP/G minus
+  * A player's value is his **fantasy points per game (FP/G)** -- his per-game line
+    times the league's point values -- and his **points above replacement (PAR)**: FP/G minus
     the median FP/G of the 10 best healthy free agents in that window.
   * A team's strength is its **projected weekly points**: each day, the best legal
     lineup from the players with a game. Two ways to compute it:

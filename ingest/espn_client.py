@@ -138,26 +138,6 @@ DEFAULTS_URL = (
 )
 
 
-def fetch_player_history(season: int, player_ids: list[int], batch_size: int = 100) -> list[dict]:
-    """Player records for a past season from ESPN's league-independent player data
-    (what its public player pages use): no login, and no need for the league to have
-    existed that season."""
-    records = []
-    for start in range(0, len(player_ids), batch_size):
-        batch = [int(p) for p in player_ids[start : start + batch_size]]
-        filters = {
-            "players": {
-                "filterIds": {"value": batch},
-                "filterStatsForSourceIds": {"value": [0]},
-                "filterStatsForSplitTypeIds": {"value": [0]},
-            }
-        }
-        headers = {"x-fantasy-filter": json.dumps(filters)}
-        data = _get(DEFAULTS_URL.format(season=season), {"view": "kona_player_info"}, headers, None)
-        records.extend(entry["player"] for entry in data.get("players", []))
-    return records
-
-
 ACTIVITY_TYPES = [178, 180, 179, 239, 181, 244, 188]
 
 

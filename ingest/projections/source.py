@@ -8,7 +8,9 @@ and backs off on rate limits and server errors. The key lives in Secret Manager
 What it reads, ALL-STAR only:
 * /v1/stats -- every player's line in every regular-season game (min "00" = didn't play)
 * /v1/players -- names, team, position, draft year (there are no birth dates)
-* /v1/player_injuries -- current injury status
+* /v1/games -- the season's schedule (games left per team, for the in-season blend)
+* /v1/player_injuries -- current injury status (status and return date only: the
+  written notes are someone else's reporting and aren't kept)
 
 BallDontLie names a season by the year it starts (2025 = 2025-26); League Lab by the
 year it ends (2026 = 2025-26). Everything here takes and returns League Lab's.
@@ -100,8 +102,20 @@ class Client:
             params["end_date"] = end.isoformat()
         return list(self.pages("stats", params))
 
-    def players(self):
-        return list(self.pages("players", {}))
+    def players(self, ids: list[int] | None = None):
+        """Every player, or only these ids (100 per request)."""
+        if ids is None:
+            return list(self.pages("players", {}))
+        ids = sorted(set(ids))
+        return [
+            p
+            for start in range(0, len(ids), PER_PAGE)
+            for p in self.pages("players", {"player_ids[]": ids[start : start + PER_PAGE]})
+        ]
+
+    def games(self, season: int):
+        """The season's regular-season schedule, played and not."""
+        return list(self.pages("games", {"seasons[]": to_bdl(season), "postseason": "false"}))
 
     def injuries(self):
         return list(self.pages("player_injuries", {}))
@@ -118,11 +132,24 @@ def minutes(value) -> float:
     return float(text)
 
 
+def final(game: dict) -> bool:
+    """A finished game (a game in progress has partial lines). Older rows without a
+    status count as finished."""
+    state = game.get("status_state")
+    if state:
+        return state == "final"
+    status = game.get("status")
+    return not status or str(status).startswith("Final")
+
+
 def game_rows(records: list[dict], ingested_at: dt.datetime) -> pd.DataFrame:
-    """Raw /stats rows -> nba_player_games rows (League Lab seasons, BallDontLie columns)."""
+    """Raw /stats rows -> nba_player_games rows (League Lab seasons, BallDontLie columns).
+    Games not yet finished are left out."""
     rows = []
     for r in records:
         game = r.get("game") or {}
+        if not final(game):
+            continue
         rows.append(
             {
                 "player_id": int(r["player"]["id"]),
@@ -160,3 +187,43 @@ def player_rows(records: list[dict], ingested_at: dt.datetime) -> pd.DataFrame:
             for r in records
         ]
     )
+
+
+def games_left(schedule: list[dict], after: dt.date) -> pd.Series:
+    """Games each team still has after `after`, by team abbreviation."""
+    teams = [
+        (g.get(side) or {}).get("abbreviation")
+        for g in schedule
+        if dt.date.fromisoformat(str(g["date"])[:10]) > after and not g.get("postseason")
+        for side in ("home_team", "visitor_team")
+    ]
+    return pd.Series(teams, dtype="object").value_counts().rename("games_left")
+
+
+# BallDontLie's statuses -> the codes League Lab's pages use (ESPN's)
+INJURY_STATUS = {
+    "Out": "OUT",
+    "Doubtful": "DAY_TO_DAY",
+    "Questionable": "DAY_TO_DAY",
+    "Day-To-Day": "DAY_TO_DAY",
+    "Probable": "ACTIVE",
+    "Available": "ACTIVE",
+}
+
+
+def injury_rows(records: list[dict], ingested_at: dt.datetime) -> pd.DataFrame:
+    """Raw /player_injuries rows -> nba_injuries rows: status and return date only."""
+    rows = []
+    for r in records:
+        returns = r.get("return_date")
+        rows.append(
+            {
+                "player_id": int(r["player"]["id"]),
+                "status": INJURY_STATUS.get(r.get("status"), "DAY_TO_DAY"),
+                "source_status": r.get("status"),
+                "return_date": dt.date.fromisoformat(returns[:10]) if returns else None,
+                "ingested_at": ingested_at,
+            }
+        )
+    columns = ["player_id", "status", "source_status", "return_date", "ingested_at"]
+    return pd.DataFrame(rows, columns=columns).drop_duplicates("player_id", keep="last")

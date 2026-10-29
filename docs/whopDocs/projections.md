@@ -1,7 +1,8 @@
 # LeagueLabWhop: our own projection model
 
 **Status: model live in `league-lab-whop`'s pages (October 21, 2026); it beats ESPN's
-projections on the backtest. Next: the nightly in-season update.** The Whop version replaces ESPN's projections
+projections on the backtest. In-season blend live October 29
+([nightly-update.md](nightly-update.md)).** The Whop version replaces ESPN's projections
 with our own. Everything downstream (PAR, roster strength, trade values, projected
 standings) already runs on "a projected stat line per player", so the model replaces
 one input and the math above it stays as it is.
@@ -101,7 +102,7 @@ games), and rookies with no NBA history (not projected yet).
 Once games are played, blend the preseason projection with season-to-date rates,
 weighting the season-to-date side by minutes played. This is the same regression idea:
 the preseason projection acts as a prior worth a fixed number of minutes. The blend
-updates nightly with the ingest run.
+updates nightly, in the `nba-nightly` job ([nightly-update.md](nightly-update.md)).
 
 ## How we'll know it's good enough: the backtest
 
@@ -204,5 +205,6 @@ the last one.
 2. **Into the app.** Done and deployed October 21
    ([projections-in-app.md](projections-in-app.md)), with three fixes found on the way:
    fathers' birth dates, no aging past 38, and stars' minutes.
-3. **In season.** The nightly blend.
+3. **In season.** Done October 29: the nightly blend, with a tuned start for rookies
+   ([nightly-update.md](nightly-update.md)).
 4. **Show the work.** A "How our projections work" page: a selling point, and honest.

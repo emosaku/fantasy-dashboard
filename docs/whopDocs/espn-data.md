@@ -37,7 +37,9 @@ This is a plan, not legal advice. The open questions are in
    with ESPN fantasy basketball leagues" plus a "not affiliated with ESPN" line (a
    lawyer question). Rename labels like "ESPN outlook".
 5. **Actual stats, games history and injuries** from BallDontLie ALL-STAR, leaving ESPN
-   as the source of league data and the NBA schedule only.
+   as the source of league data and the NBA schedule only. Done October 29
+   ([nightly-update.md](nightly-update.md)). ESPN's fantasy points for actual stats are
+   dropped too: ours are stored, ESPN's are only compared in memory.
 
 ## Public and private leagues
 

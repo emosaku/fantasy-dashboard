@@ -1,7 +1,7 @@
 """Tests for ingest/transform.py's riskiest logic: unpacking box_scores()'s
 home/away structure, the long per-game stat rows, flattening activity's bundled
-actions, and past-season games played. Every row must carry league_id and season.
-Fakes mimic only the espn-api attributes transform.py reads."""
+actions, and our windows, points and injuries in place of ESPN's. Every row must
+carry league_id and season. Fakes mimic only the espn-api attributes transform.py reads."""
 
 import datetime as dt
 import hashlib
@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 from ingest.transform import (
+    apply_injuries,
     bench_slots,
     lineup_slots,
     points_mismatches,
@@ -19,14 +20,14 @@ from ingest.transform import (
     transform_matchup_scores,
     transform_player_details,
     transform_player_points,
-    transform_player_seasons,
-    transform_player_stats,
     transform_pro_schedule,
     transform_projected_points,
     transform_projected_stats,
     transform_rosters,
     transform_teams,
     transform_transactions,
+    transform_window_points,
+    transform_window_stats,
     week_of,
 )
 
@@ -124,20 +125,6 @@ def test_matchup_categories_skip_bye_weeks():
     assert transform_matchup_categories(league, [1], LEAGUE, SEASON, AT).empty
 
 
-def test_player_stats_are_long_and_skip_unfilled_windows_and_espns_projection():
-    player = make_player(
-        99,
-        {
-            f"{SEASON}_last_7": {"applied_total": 0},  # no "avg" yet: skipped
-            f"{SEASON}_total": {"avg": {"PTS": 20.0, "TO": 2.0, "3PA": 6.0, "XYZ": 1.0}},
-            f"{SEASON}_projected": {"avg": {"PTS": 99.0}},  # ESPN's content: never kept
-        },
-    )
-    df = transform_player_stats([player, player], LEAGUE, SEASON, AT)  # repeat ignored
-    assert set(df["stat_window"]) == {"season"}
-    assert dict(zip(df["stat"], df["value"], strict=True)) == {"3PA": 6.0, "PTS": 20.0, "TO": 2.0}
-
-
 def test_rosters_and_free_agents():
     hurt = make_player(1)
     hurt.expected_return_date = dt.date(2026, 11, 20)
@@ -193,21 +180,6 @@ def test_lineup_moves_keep_their_team_and_slots():
     assert row["detail"] == "BE to UT"
 
 
-def season_total(season, games):
-    return {"seasonId": season, "statSourceId": 0, "statSplitTypeId": 0, "stats": {"42": games}}
-
-
-def test_player_seasons_record_null_for_players_without_a_line():
-    butler = {"id": 6430, "stats": [season_total(2026, 38.0)]}
-    projected = {"id": 7, "stats": [{"seasonId": 2026, "statSourceId": 1, "statSplitTypeId": 0,
-                                     "stats": {"42": 70.0}}]}  # fmt: skip
-    df = transform_player_seasons({2026: [butler, projected]}, [6430, 7, 5000], AT)
-    got = dict(zip(df["player_id"], df["games_played"], strict=True))
-    assert got[6430] == 38.0
-    assert pd.isna(got[7]) and pd.isna(got[5000])  # a projection isn't a season played
-    assert (df["history_season"] == 2026).all()
-
-
 def test_player_details_keep_injury_fields_but_not_espns_outlook():
     records = [
         {"id": 1, "injured": True, "injuryStatus": "OUT", "expectedReturnDate": [2026, 11, 20],
@@ -226,24 +198,71 @@ SCORING = [{"stat": "PTS", "points": 1.0}, {"stat": "FGA", "points": -1.0},
            {"stat": "REB", "points": 1.0}]  # fmt: skip
 
 
-def test_player_points_prefer_espns_numbers_and_keep_ours_beside_them():
+def test_espns_points_are_read_for_the_check_only():
     espn = {"applied_avg": 18.0, "applied_total": 180.0,
             "avg": {"PTS": 20.0, "FGA": 12.0, "REB": 8.0}, "total": {"GP": 10.0}}  # fmt: skip
     preseason = {"applied_avg": 0, "applied_total": 0, "avg": {"PTS": 10.0, "FGA": 8.0}}
     player = make_player(7, {f"{SEASON}_total": espn, f"{SEASON}_projected": preseason})
-    last7 = {"applied_avg": 0, "applied_total": 0, "avg": {"PTS": 10.0, "FGA": 8.0}}
-    player.stats[f"{SEASON}_last_7"] = last7
     df = transform_player_points([player, player], SCORING, LEAGUE, SEASON, AT)
+    assert list(df["stat_window"]) == ["season"]  # ESPN's projection is never read
+    assert df.iloc[0]["fp_per_game"] == 18.0 and df.iloc[0]["source"] == "espn"
+
+
+def windows():
+    """run.windows' shape: long per-game lines by ESPN player id."""
+    rows = [(7, "season", "PTS", 20.0), (7, "season", "FGA", 15.0), (7, "season", "REB", 6.0),
+            (7, "season", "GP", 8.0), (7, "last_7", "PTS", 30.0), (7, "last_7", "GP", 3.0),
+            (8, "season", "PTS", 10.0), (8, "season", "GP", 5.0)]  # fmt: skip
+    return pd.DataFrame(rows, columns=["player_id", "stat_window", "stat", "value"])
+
+
+def test_our_windows_fill_player_stats_for_pool_players_only():
+    df = transform_window_stats(windows(), [7, 99], LEAGUE, SEASON, AT, ["PTS", "GP", "AST"])
+    assert set(df["player_id"]) == {7}
+    assert (df["league_id"] == LEAGUE).all() and (df["season"] == SEASON).all()
+    got = {(w, s): v for w, s, v in zip(df["stat_window"], df["stat"], df["value"], strict=True)}
+    assert got == {("season", "PTS"): 20.0, ("season", "GP"): 8.0,
+                   ("last_7", "PTS"): 30.0, ("last_7", "GP"): 3.0}  # fmt: skip
+
+
+def test_our_window_points_use_the_leagues_values():
+    df = transform_window_points(windows(), [7], SCORING, LEAGUE, SEASON, AT)
     rows = df.set_index("stat_window")
-    assert len(df) == 2  # a repeated player isn't loaded twice; ESPN's projection never
-    assert "projected" not in rows.index
-    assert rows.at["season", "fp_per_game"] == 18.0 and rows.at["season", "source"] == "espn"
-    assert rows.at["season", "computed_per_game"] == 16.0 and rows.at["season", "games"] == 10
-    # ESPN sent 0: our stat x points is used instead.
-    assert rows.at["last_7", "fp_per_game"] == 2.0
-    assert rows.at["last_7", "source"] == "computed"
-    off = points_mismatches(df)
-    assert list(off["stat_window"]) == ["season"]  # 18 vs 16: more than 0.1 apart
+    assert rows.at["season", "fp_per_game"] == 20.0 - 15.0 + 6.0
+    assert rows.at["season", "fp_total"] == 11.0 * 8 and rows.at["season", "games"] == 8
+    assert rows.at["last_7", "fp_per_game"] == 30.0
+    assert (df["source"] == "computed").all()
+
+
+def test_points_check_compares_espns_points_with_ours():
+    espn = pd.DataFrame([
+        {"player_id": 7, "stat_window": "season", "fp_per_game": 11.05, "source": "espn"},
+        {"player_id": 7, "stat_window": "last_7", "fp_per_game": 25.0, "source": "espn"},
+        {"player_id": 9, "stat_window": "season", "fp_per_game": 2.0, "source": "computed"},
+    ])  # fmt: skip
+    ours = transform_window_points(windows(), [7, 9], SCORING, LEAGUE, SEASON, AT)
+    off = points_mismatches(espn, ours)
+    assert list(off["stat_window"]) == ["last_7"]  # 25 vs 30; 11.05 vs 11 is within 0.1
+    assert points_mismatches(espn, ours.iloc[0:0]).empty
+
+
+def test_injuries_come_from_our_list_and_everyone_else_is_active():
+    details = pd.DataFrame([
+        {"player_id": 1, "injured": False, "injury_status": "ACTIVE", "expected_return_date": None},
+        {"player_id": 2, "injured": True, "injury_status": "OUT",
+         "expected_return_date": dt.date(2026, 12, 1)},
+    ])  # fmt: skip
+    ours = pd.DataFrame(
+        {"status": ["OUT"], "return_date": [dt.date(2026, 11, 4)]}, index=pd.Index([1])
+    )
+    out = apply_injuries(details, ours).set_index("player_id")
+    assert out.at[1, "injury_status"] == "OUT" and out.at[1, "injured"]
+    assert out.at[1, "expected_return_date"] == dt.date(2026, 11, 4)
+    assert out.at[2, "injury_status"] == "ACTIVE" and not out.at[2, "injured"]
+    assert out.at[2, "expected_return_date"] is None  # ESPN's date isn't kept
+    free_agents = pd.DataFrame([{"player_id": 2, "injury_status": "OUT"}])
+    assert apply_injuries(free_agents, ours, None).iloc[0]["injury_status"] == "ACTIVE"
+    assert apply_injuries(free_agents, None, None).iloc[0]["injury_status"] is None
 
 
 def test_lineup_slots_leave_out_bench_and_ir():

@@ -2,7 +2,14 @@ import datetime as dt
 
 import pytest
 import requests
-from ingest.projections.source import Client, game_rows, minutes, player_rows
+from ingest.projections.source import (
+    Client,
+    game_rows,
+    games_left,
+    injury_rows,
+    minutes,
+    player_rows,
+)
 
 
 class FakeResponse:
@@ -132,3 +139,45 @@ def test_player_rows_start_without_birth_dates_or_espn_ids():
     row = rows.iloc[0]
     assert (row["player_name"], row["draft_year"], row["team"]) == ("Nikola Jokic", 2014, "DEN")
     assert row["birth_date"] is None and row["espn_player_id"] is None
+
+
+def test_unfinished_games_are_left_out():
+    at = dt.datetime(2026, 10, 29, tzinfo=dt.UTC)
+    live = raw(3, 8, "20")
+    live["game"] |= {"status": "3rd Qtr", "status_state": "in"}
+    done = raw(4, 9, "20")
+    done["game"] |= {"status": "Final", "status_state": "final"}
+    assert list(game_rows([live, done], at)["player_id"]) == [4]
+
+
+def test_players_by_id_ask_in_batches_of_a_hundred():
+    bdl, session, _ = client([FakeResponse(200, {"data": [{"id": 1}]}),
+                              FakeResponse(200, {"data": [{"id": 150}]})])  # fmt: skip
+    assert [p["id"] for p in bdl.players(list(range(1, 151)))] == [1, 150]
+    assert len(session.calls[0][1]["player_ids[]"]) == 100
+
+
+def test_games_left_count_both_teams_after_the_day():
+    def game(day, home, away):
+        return {"date": day, "postseason": False, "home_team": {"abbreviation": home},
+                "visitor_team": {"abbreviation": away}}  # fmt: skip
+
+    schedule = [game("2026-10-28", "DEN", "LAL"), game("2026-10-29", "DEN", "BOS"),
+                game("2026-10-30", "LAL", "BOS")]  # fmt: skip
+    left = games_left(schedule, dt.date(2026, 10, 28))
+    assert left.to_dict() == {"BOS": 2, "DEN": 1, "LAL": 1}
+
+
+def test_injuries_keep_status_and_date_but_not_the_notes():
+    at = dt.datetime(2026, 10, 29, tzinfo=dt.UTC)
+    records = [
+        {"player": {"id": 1}, "status": "Out", "return_date": "2026-11-04",
+         "description": "Someone's reporting."},
+        {"player": {"id": 2}, "status": "Questionable", "return_date": None},
+        {"player": {"id": 3}, "status": "Probable"},
+    ]  # fmt: skip
+    rows = injury_rows(records, at).set_index("player_id")
+    assert list(rows["status"]) == ["OUT", "DAY_TO_DAY", "ACTIVE"]
+    assert rows.at[1, "return_date"] == dt.date(2026, 11, 4)
+    assert rows.at[2, "source_status"] == "Questionable"
+    assert "description" not in rows

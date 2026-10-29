@@ -1014,7 +1014,7 @@ with mock_tab:
             if window == "blended"
             else "."
         )
-        + " Health is ESPN's status; it doesn't give injury type."
+        + " Health is the NBA injury report's status; it doesn't give injury type."
     )
 
     def side_report(team_id, result, team_overrides, team_punts) -> None:

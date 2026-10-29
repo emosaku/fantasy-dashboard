@@ -4,7 +4,7 @@
 shows projected numbers now shows ours, built by the model in
 [projections.md](projections.md), and nothing ESPN wrote (its projections or its
 player outlooks) is stored or shown any more. This is step 1 of the remaining timeline;
-step 2, the nightly current-season update, is next.
+step 2, the nightly current-season update, is done too ([nightly-update.md](nightly-update.md)).
 
 ## How it works
 
@@ -100,9 +100,8 @@ Deployed: `league-ingest` and `league-lab` (revision `league-lab-00002-r96`) in
 1. **Rookies aren't projected.** A rookie model (draft slot and college or overseas
    stats) is a later item; until then the pages show nothing projected for them.
 2. **Stars still run a little low against ESPN** (above).
-3. **Preseason only.** The projection doesn't move as the season goes yet; the nightly
-   update (step 2) adds the in-season blend and refreshes the stat windows and player
-   matching.
+3. ~~**Preseason only.**~~ Fixed October 29: the nightly update blends in the season so
+   far ([nightly-update.md](nightly-update.md)).
 4. **A points league's stats outside the 15 we project** (fouls, double-doubles) count 0
    in projected fantasy points, as decided for the stats source.
 

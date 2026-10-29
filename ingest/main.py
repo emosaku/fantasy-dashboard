@@ -4,16 +4,22 @@ One Cloud Run Job with parallel tasks. Each task takes its slice of the leagues 
 refresh (CLOUD_RUN_TASK_INDEX of CLOUD_RUN_TASK_COUNT): active leagues someone has
 opened in the last 14 days, or exactly LEAGUE_IDS for a manual refresh. Per league,
 with a random pause between leagues and backoff on every ESPN call, it fetches only
-what changed -- the still-open matchup weeks, activity newer than it already has,
-games-played history for players it hasn't seen -- and replaces that league's rows.
-Then one refresh of the precomputed m_* tables covers all of the task's leagues.
+what changed -- the still-open matchup weeks, activity newer than it already has --
+and replaces that league's rows. Then one refresh of the precomputed m_* tables covers
+all of the task's leagues.
+
+ESPN supplies the league itself (settings, teams, rosters, matchups, activity, free
+agents) and the NBA schedule. Player numbers are ours, read once per run from the
+tables the nightly NBA update fills (ingest/projections/nightly.py): actual-stat
+windows from BallDontLie games, our projections, and injuries.
 
 A league is loaded in its locked format (categories or points; see catalog.py):
 the format is confirmed at sign-up and fixed for the season. If ESPN's scoring type
 stops matching it, the league is flagged (format_mismatch) and not refreshed until
 the site owner reloads it in the right format (scripts/set_format.py). A points
-league also loads its point values, every player's fantasy points, the season's
-weekly scores and the NBA schedule.
+league also loads its point values, every player's fantasy points (ours, checked
+against ESPN's in memory: points_check), the season's weekly scores and the NBA
+schedule.
 
 A league that fails (made private, deleted, unsupported) is marked with the reason
 in the registry; the others carry on. The run fails -- triggering the alert -- only
@@ -22,7 +28,7 @@ rows, their registry entries and any stored credentials.
 
 Env: GCP_PROJECT_ID, SEASON (required); BIGQUERY_DATASET (league_lab); LEAGUE_IDS
 (comma list: manual refresh); PURGE_ONLY (1: only purge); FREE_AGENT_COUNT (100);
-HISTORY_SEASONS (3).
+AS_OF (the last day our stat windows cover; default yesterday, US Eastern).
 """
 
 import datetime as dt
@@ -49,7 +55,6 @@ from ingest.espn_client import (
     LeagueNotAccessible,
     build_league,
     fetch_activity,
-    fetch_player_history,
     fetch_player_info,
     fetch_settings,
     fetch_views,
@@ -57,7 +62,9 @@ from ingest.espn_client import (
 )
 from ingest.materialize import MATERIALIZED_VIEWS, refresh_statements, table_for
 from ingest.projections import run as projections
+from ingest.projections.nightly import default_as_of
 from ingest.transform import (
+    apply_injuries,
     bench_slots,
     lineup_slots,
     points_mismatches,
@@ -69,14 +76,14 @@ from ingest.transform import (
     transform_matchup_scores,
     transform_player_details,
     transform_player_points,
-    transform_player_seasons,
-    transform_player_stats,
     transform_pro_schedule,
     transform_projected_points,
     transform_projected_stats,
     transform_rosters,
     transform_teams,
     transform_transactions,
+    transform_window_points,
+    transform_window_stats,
 )
 
 LEAGUE_TABLES = [
@@ -104,7 +111,7 @@ class Config:
         self.location = env.get("BIGQUERY_LOCATION", "us-west1")
         self.season = int(env["SEASON"])
         self.free_agents = int(env.get("FREE_AGENT_COUNT", "100"))
-        self.history_seasons = int(env.get("HISTORY_SEASONS", "3"))
+        self.as_of = dt.date.fromisoformat(env["AS_OF"]) if env.get("AS_OF") else None
         ids = env.get("LEAGUE_IDS", "").strip()
         self.only_ids = {int(i) for i in ids.split(",") if i.strip()} if ids else None
         self.purge_only = env.get("PURGE_ONLY") == "1"
@@ -112,25 +119,30 @@ class Config:
         self.task_count = int(env.get("CLOUD_RUN_TASK_COUNT", "1"))
 
 
-def missing_history(client, cfg, player_ids) -> dict[int, list[int]]:
-    """{past season: player ids with no player_seasons row yet}."""
-    seasons = list(range(cfg.season - cfg.history_seasons, cfg.season))
-    if not player_ids:
-        return {}
-    seen = client.query(
-        f"SELECT player_id, history_season FROM `{cfg.project}.{cfg.dataset}.player_seasons` "
-        f"WHERE {in_list('player_id', player_ids)} AND {in_list('history_season', seasons)}"
-    ).result()
-    have = {(row.player_id, row.history_season) for row in seen}
-    return {s: [p for p in player_ids if (p, s) not in have] for s in seasons}
+class Ours:
+    """Our player numbers for one run, shared by every league (ESPN player ids):
+    projected (projections.latest), windows (projections.windows) and injuries
+    (projections.injuries)."""
+
+    def __init__(self, projected=None, windows=None, injuries=None):
+        self.projected, self.windows, self.injuries = projected, windows, injuries
+
+    @classmethod
+    def load(cls, client, cfg: Config, now: dt.datetime) -> "Ours":
+        as_of = cfg.as_of or default_as_of(now)
+        return cls(
+            projections.latest(client, cfg.project, cfg.dataset, cfg.season),
+            projections.windows(client, cfg.project, cfg.dataset, cfg.season, as_of),
+            projections.injuries(client, cfg.project, cfg.dataset),
+        )
 
 
 def ingest_league(
-    league_doc: dict, client, db, cfg: Config, now: dt.datetime, projected=None
+    league_doc: dict, client, db, cfg: Config, now: dt.datetime, ours: Ours | None = None
 ) -> dict:
-    """Refresh one league; returns the registry fields to record. `projected`: our
-    projections by ESPN player id (projections.latest), written as the "projected"
-    window in place of ESPN's."""
+    """Refresh one league; returns the registry fields to record. `ours`: our stat
+    windows, projections and injuries, written in place of ESPN's."""
+    ours = ours or Ours()
     league_id = league_doc["league_id"]
     season = int(league_doc.get("season") or cfg.season)
     cookies = cookies_for(league_doc, cfg.project)
@@ -168,10 +180,6 @@ def ingest_league(
             raise NeedsLogin(EXPIRED) from None
         topics, activity_needs_login = [], True
     details = fetch_player_info(league_id, season, pool_ids, cookies)
-    history = {
-        s: (ids, fetch_player_history(s, ids) if ids else [])
-        for s, ids in missing_history(client, cfg, pool_ids).items()
-    }
 
     def load(table, df, extra=""):
         return replace_rows(
@@ -200,13 +208,17 @@ def ingest_league(
                 league_id, season, now,
             ),
         )  # fmt: skip
-        player_points = transform_player_points(
+        actual = transform_window_points(ours.windows, pool_ids, scoring, league_id, season, now)
+        projected = transform_projected_points(
+            ours.projected, pool_ids, scoring, league_id, season, now
+        )
+        load("player_points", pd.concat([actual, projected], ignore_index=True))
+        # ESPN's own fantasy points, never stored: a check on our stats and our math
+        espn_points = transform_player_points(
             rostered + free_agents, scoring, league_id, season, now
         )
-        ours = transform_projected_points(projected, pool_ids, scoring, league_id, season, now)
-        load("player_points", pd.concat([player_points, ours], ignore_index=True))
-        off = points_mismatches(player_points)
-        points_check = {"checked": int((player_points["source"] == "espn").sum()),
+        off = points_mismatches(espn_points, actual)
+        points_check = {"checked": int((espn_points["source"] == "espn").sum()),
                         "mismatched": int(len(off))}  # fmt: skip
         if len(off):
             print(f"league {league_id}: {len(off)} player windows differ from ESPN's points")
@@ -218,30 +230,26 @@ def ingest_league(
             transform_matchup_categories(league, periods, league_id, season, now),
             f"season = {season} AND {in_list('matchup_period', periods)}",
         )
-    load("rosters", transform_rosters(league, league_id, season, now))
-    load("free_agents", transform_free_agents(free_agents, league_id, season, now))
+    load("rosters", apply_injuries(transform_rosters(league, league_id, season, now),
+                                   ours.injuries))  # fmt: skip
+    load("free_agents", apply_injuries(transform_free_agents(free_agents, league_id, season, now),
+                                       ours.injuries, None))  # fmt: skip
     load(
         "player_stats",
         pd.concat(
             [
-                transform_player_stats(rostered + free_agents, league_id, season, now, stats),
-                transform_projected_stats(projected, pool_ids, league_id, season, now, stats),
+                transform_window_stats(ours.windows, pool_ids, league_id, season, now, stats),
+                transform_projected_stats(ours.projected, pool_ids, league_id, season, now, stats),
             ],
             ignore_index=True,
         ),
     )
-    load("player_details", transform_player_details(details, league_id, season, now))
+    load("player_details", apply_injuries(
+        transform_player_details(details, league_id, season, now), ours.injuries))  # fmt: skip
     names = {p.playerId: p.name for p in rostered + free_agents} | dict(league.player_map)
     new_txns = transform_transactions(topics, names, league_id, season, now)
     if not new_txns.empty:
         load("transactions", new_txns, in_list("txn_id", list(new_txns["txn_id"])))
-    for past_season, (ids, records) in history.items():
-        if ids:
-            replace_rows(
-                client, cfg.project, cfg.dataset, "player_seasons",
-                transform_player_seasons({past_season: records}, ids, now),
-                f"{in_list('player_id', ids)} AND history_season = {past_season}",
-            )  # fmt: skip
 
     fields = {} if locked else {  # leagues registered before the format lock
         "format": espn_format, "format_season": season, "format_locked_at": now,
@@ -312,18 +320,18 @@ def main(env=os.environ) -> int:
         registry.leagues_to_refresh(db, now, cfg.only_ids), cfg.task_index, cfg.task_count
     )
     print(f"task {cfg.task_index}/{cfg.task_count}: {len(leagues)} league(s)")
-    projected = (
-        projections.latest(client, cfg.project, cfg.dataset, cfg.season) if leagues else None
-    )
+    ours = Ours.load(client, cfg, now) if leagues else None
     if leagues:
-        print(f"our projections: {len(projected)} players")
+        with_games = ours.windows["player_id"].nunique()
+        print(f"ours: {len(ours.projected)} projected, {with_games} with games, "
+              f"{len(ours.injuries)} injured")  # fmt: skip
     done, failed = [], []
     for position, league_doc in enumerate(leagues):
         if position:
             time.sleep(random.uniform(*STAGGER_SECONDS))  # spread load on ESPN
         league_id = league_doc["league_id"]
         try:
-            fields = ingest_league(league_doc, client, db, cfg, now, projected)
+            fields = ingest_league(league_doc, client, db, cfg, now, ours)
             registry.record_success(db, league_id, fields)
             done.append(league_id)
             print(f"league {league_id}: ok")

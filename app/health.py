@@ -1,4 +1,4 @@
-"""Health and durability: ESPN's injury status, expected return date and games
+"""Health and durability: the NBA injury status, expected return date and games
 played in each of the last 3 seasons. One component, shared by the Mock trade's
 "Players in this deal" table and Compare's Players mode (both read
 queries.player_profile(), indexed by player_id)."""

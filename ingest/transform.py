@@ -12,9 +12,11 @@ from espn_api.basketball.constant import ACTIVITY_MAP, POSITION_MAP, PRO_TEAM_MA
 
 from ingest.catalog import PLAYER_STATS, scoring_type
 
-# ESPN's stat-window keys -> this project's stat_window. ESPN's own projections
-# ("_projected") are ESPN's content and aren't kept: the "projected" window is ours
-# (ingest/projections; transform_projected_stats and transform_projected_points).
+# ESPN's stat-window keys -> this project's stat_window. Only read for the points
+# check (transform_player_points): every stored window is ours, built from BallDontLie
+# games (transform_window_stats, transform_window_points) and our projections
+# (transform_projected_stats, transform_projected_points). ESPN's own projections
+# ("_projected") are never read.
 WINDOW_SUFFIXES = {
     "_total": "season",
     "_last_30": "last_30",
@@ -22,7 +24,6 @@ WINDOW_SUFFIXES = {
     "_last_7": "last_7",
 }
 PROJECTED = "projected"
-GAMES_PLAYED_STAT = "42"
 NOT_STARTING = {"BE", "IR", "Rookie", ""}  # eligibleSlots that aren't lineup spots
 POINTS_TOLERANCE = 0.1  # our stat x points vs ESPN's applied average, per game
 
@@ -151,34 +152,6 @@ def transform_free_agents(free_agents, league_id, season, ingested_at):
     )
 
 
-def transform_player_stats(players, league_id, season, ingested_at, stats=PLAYER_STATS):
-    """Per-game averages, long: one row per player x window x stat, for every stat
-    the category catalog can use (plus GP), and any other stat a points league scores.
-    Windows ESPN hasn't filled are skipped."""
-    rows, seen = [], set()
-    for player in players:
-        if player.playerId in seen:
-            continue
-        seen.add(player.playerId)
-        for suffix, window in WINDOW_SUFFIXES.items():
-            data = player.stats.get(f"{season}{suffix}")
-            if not data or "avg" not in data:
-                continue
-            for stat in stats:
-                value = data["avg"].get(stat)
-                if value is not None:
-                    rows.append(
-                        {
-                            **_base(league_id, season, ingested_at),
-                            "player_id": player.playerId,
-                            "stat_window": window,
-                            "stat": stat,
-                            "value": float(value),
-                        }
-                    )
-    return pd.DataFrame(rows)
-
-
 def _activity_team(msg: dict):
     """Which team a message is about -- including "for" on a lineup move, which
     espn_api leaves blank."""
@@ -237,36 +210,6 @@ def transform_player_details(records, league_id, season, ingested_at):
     return pd.DataFrame(rows)
 
 
-def _games_played(record: dict, season: int):
-    for stat in record.get("stats", []):
-        if (
-            stat.get("seasonId") == season
-            and stat.get("statSourceId") == 0
-            and stat.get("statSplitTypeId") == 0
-        ):
-            return stat.get("stats", {}).get(GAMES_PLAYED_STAT)
-    return None
-
-
-def transform_player_seasons(records_by_season, player_ids, ingested_at):
-    """Games played per past season for these players. A player with no line that
-    season gets a row with NULL, so he isn't fetched again tomorrow."""
-    rows = []
-    for history_season, records in records_by_season.items():
-        found = {r["id"]: _games_played(r, history_season) for r in records}
-        for player_id in player_ids:
-            games = found.get(player_id)
-            rows.append(
-                {
-                    "player_id": player_id,
-                    "history_season": history_season,
-                    "games_played": None if games is None else float(games),
-                    "ingested_at": ingested_at,
-                }
-            )
-    return pd.DataFrame(rows)
-
-
 # --- Points leagues -------------------------------------------------------------------
 
 
@@ -301,9 +244,9 @@ def computed_points(avg: dict | None, scoring: list[dict]) -> float | None:
 
 
 def transform_player_points(players, scoring, league_id, season, ingested_at):
-    """Each player's fantasy points per stat window: ESPN's own numbers (appliedAverage,
-    appliedTotal: bonuses included), with our stat x points beside them. ESPN's are used
-    whenever it sent them; `source` says which one fp_per_game is."""
+    """ESPN's fantasy points per stat window (appliedAverage, appliedTotal: bonuses
+    included), with stat x points from ESPN's own line beside them. Not stored: only
+    the points check (points_mismatches) reads it, against ours."""
     rows, seen = [], set()
     for player in players:
         if player.playerId in seen:
@@ -391,15 +334,84 @@ def transform_projected_points(lines, player_ids, scoring, league_id, season, in
     return pd.DataFrame(rows)
 
 
-def points_mismatches(points: pd.DataFrame) -> pd.DataFrame:
-    """Player windows where ESPN's applied average and our stat x points differ by
-    more than POINTS_TOLERANCE: a sign a scoring rule was misread (or a bonus stat,
-    like double-doubles, that the per-game line doesn't carry)."""
-    if points.empty:
-        return points
-    both = points.loc[(points["source"] == "espn") & points["computed_per_game"].notna()]
-    gap = (both["fp_per_game"] - both["computed_per_game"]).abs()
-    return both.loc[gap > POINTS_TOLERANCE]
+def points_mismatches(espn: pd.DataFrame, ours: pd.DataFrame) -> pd.DataFrame:
+    """Player windows where ESPN's applied average and our fantasy points (our games x
+    the league's values) differ by more than POINTS_TOLERANCE: a misread scoring rule, a
+    game one side has and the other doesn't, or a bonus stat (double-doubles) our line
+    doesn't carry. espn: transform_player_points; ours: transform_window_points."""
+    if espn.empty or ours.empty:
+        return pd.DataFrame(columns=["player_id", "stat_window", "espn", "ours"])
+    keys = ["player_id", "stat_window"]
+    both = espn.loc[espn["source"] == "espn", [*keys, "fp_per_game"]].merge(
+        ours[[*keys, "fp_per_game"]], on=keys, suffixes=("_espn", "_ours")
+    )
+    both = both.rename(columns={"fp_per_game_espn": "espn", "fp_per_game_ours": "ours"})
+    return both.loc[(both["espn"] - both["ours"]).abs() > POINTS_TOLERANCE]
+
+
+def _pool_windows(windows: pd.DataFrame, player_ids) -> pd.DataFrame:
+    if windows is None or windows.empty:
+        return pd.DataFrame(columns=["player_id", "stat_window", "stat", "value"])
+    return windows.loc[windows["player_id"].isin(set(int(p) for p in player_ids))]
+
+
+def transform_window_stats(windows, player_ids, league_id, season, ingested_at,
+                           stats=PLAYER_STATS):  # fmt: skip
+    """Our actual-stat windows (season, last 30/15/7 days) for the league's pool, in
+    player_stats' shape. windows: run.windows (long, by ESPN player id). A stat our
+    games don't carry (one only a points league scores) has no row."""
+    rows = _pool_windows(windows, player_ids)
+    rows = rows.loc[rows["stat"].isin(stats)]
+    out = rows.assign(league_id=league_id, season=season, ingested_at=ingested_at)
+    out["player_id"] = out["player_id"].astype("int64")
+    out["value"] = out["value"].astype(float)
+    return out[["league_id", "season", "ingested_at", "player_id", "stat_window", "stat",
+                "value"]].reset_index(drop=True)  # fmt: skip
+
+
+def transform_window_points(windows, player_ids, scoring, league_id, season, ingested_at):
+    """Fantasy points per window from our actual stats: the league's values times our
+    per-game line (stats the line doesn't carry count 0), source "computed"."""
+    rows = []
+    wide = _pool_windows(windows, player_ids).pivot_table(
+        index=["player_id", "stat_window"], columns="stat", values="value", aggfunc="first"
+    )
+    for (player_id, window), line in wide.iterrows():
+        avg = {k: v for k, v in line.items() if pd.notna(v)}
+        fp = computed_points(avg, scoring)
+        games = avg.get("GP")
+        rows.append(
+            {
+                **_base(league_id, season, ingested_at),
+                "player_id": int(player_id),
+                "stat_window": window,
+                "fp_per_game": float(fp),
+                "fp_total": float(fp * games) if games else None,
+                "games": float(games) if games else None,
+                "computed_per_game": float(fp),
+                "source": "computed",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def apply_injuries(frame: pd.DataFrame, injuries: pd.DataFrame | None,
+                   return_column: str | None = "expected_return_date") -> pd.DataFrame:  # fmt: skip
+    """Injury status (and return date) from our list (run.injuries, by ESPN id) in place
+    of ESPN's: a player not on it is ACTIVE. With no list at all (none loaded yet),
+    the status is unknown (None) rather than ESPN's."""
+    if frame.empty:
+        return frame
+    out = frame.copy()
+    listed = injuries if injuries is not None else pd.DataFrame(columns=["status", "return_date"])
+    status = out["player_id"].map(listed["status"])
+    out["injury_status"] = status.fillna("ACTIVE") if injuries is not None else None
+    if return_column:
+        out[return_column] = out["player_id"].map(listed["return_date"]).astype("object")
+        out[return_column] = out[return_column].where(out[return_column].notna(), None)
+    if "injured" in out:
+        out["injured"] = (out["injury_status"] != "ACTIVE") if injuries is not None else None
+    return out
 
 
 def transform_matchup_scores(schedule, current_period, league_id, season, ingested_at):

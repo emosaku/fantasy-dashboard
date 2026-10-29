@@ -1,7 +1,8 @@
 """Shut League Lab down in one command -- e.g. the day a cease-and-desist arrives.
 
 In order:
-  1. pause the daily ingest schedule (no more requests to ESPN);
+  1. pause the daily schedules (league ingest and the nightly NBA update: no more
+     requests to ESPN or BallDontLie);
   2. put up the shutdown page (SHUTDOWN=1 on the dashboard service);
   3. delete every stored ESPN credential (Secret Manager secrets named league-*);
   4. delete every league's data: the BigQuery dataset, and the Firestore leagues,
@@ -35,15 +36,18 @@ def main() -> None:
     parser.add_argument("--region", default="us-west1")
     parser.add_argument("--dataset", default="league_lab")
     parser.add_argument("--service", default="league-lab")
-    parser.add_argument("--schedule", default="league-ingest-daily")
+    parser.add_argument(
+        "--schedule", nargs="+", default=["league-ingest-daily", "nba-nightly-daily"]
+    )
     parser.add_argument("--yes", action="store_true", help="actually do it")
     args = parser.parse_args()
     really = args.yes
     print("TEARDOWN" if really else "DRY RUN (add --yes to do it)", "--", args.project)
 
-    print("\n1. Pause the daily ingest")
-    run(["gcloud", "scheduler", "jobs", "pause", args.schedule,
-         f"--location={args.region}", f"--project={args.project}"], really)  # fmt: skip
+    print("\n1. Pause the daily schedules")
+    for schedule in args.schedule:
+        run(["gcloud", "scheduler", "jobs", "pause", schedule,
+             f"--location={args.region}", f"--project={args.project}"], really)  # fmt: skip
 
     print("\n2. Shutdown page")
     run(["gcloud", "run", "services", "update", args.service, "--update-env-vars=SHUTDOWN=1",
