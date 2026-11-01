@@ -114,6 +114,8 @@ One short consult before charging anyone:
 
 ## Order of work
 
+Superseded by the release backlog: [backlog.md](backlog.md).
+
 0. **Check.** Confirm
    Whop's OAuth and webhooks; pick the stats source; book the lawyer.
 1. **Data:** drop the outlook and build the projection model to its ship bar.
