@@ -279,10 +279,9 @@ memberships), and to an active subscription (R12).
    loading / error states, then cut over; Streamlit stays as an internal admin tool.
 5. **Landing page** in League Winner's ad style, with checkout through Whop.
 
-**Relation to the Whop release:** the release backlog
-([../whopDocs/backlog.md](../whopDocs/backlog.md)) ships the MVP on Streamlit. This
-plan runs on its own branch beside it; it doesn't block the release unless we decide
-to launch on the new frontend instead.
+**Relation to the Whop release (decided November 1):** the product launches on this
+React app, about a month before the 2027-28 preseason (about September 1, 2027), with
+no Streamlit release. The dated phases are in [phase-plan.md](phase-plan.md).
 
 ## 10. What not to do
 

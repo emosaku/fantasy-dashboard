@@ -3,6 +3,11 @@
 **Goal: an MVP on Whop that people can pay for.** Everything is sorted into what has to
 be done before release and what can wait until after. Updated November 1, 2026.
 
+**Superseded for scheduling (November 1):** the product launches as a React app about
+September 1, 2027, with no Streamlit release. The dated plan is
+[../reactDocs/phase-plan.md](../reactDocs/phase-plan.md); the item numbers here (R, M,
+P) are what it refers to.
+
 Owner: **Eni** for decisions and accounts only you can set up, **Claude** for the build.
 Size: S = under a day, M = 1-3 days, L = a week or more.
 
