@@ -120,3 +120,15 @@ def test_blended_rows_carry_projected_bonuses():
                         (rates, league)).set_index("player_id")  # fmt: skip
     assert {"dd", "td", "qd", "pf", "dq"} <= set(rows.columns)
     assert rows["pf"].notna().all()
+
+
+def test_the_days_injury_list_is_kept_with_its_date():
+    from ingest.projections.nightly import injury_history_rows
+    from ingest.projections.source import injury_rows
+
+    rows = injury_rows([{"player": {"id": 1}, "status": "Out", "return_date": "2026-11-04"}], NOW)
+    kept = injury_history_rows(rows, dt.date(2026, 10, 29))
+    assert kept.to_dict("records") == [{
+        "player_id": 1, "status": "OUT", "source_status": "Out",
+        "return_date": dt.date(2026, 11, 4), "snapshot_date": dt.date(2026, 10, 29),
+    }]  # fmt: skip

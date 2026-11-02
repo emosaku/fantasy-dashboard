@@ -19,6 +19,7 @@ competitive without gold-plating; everything else last. Moat items are numbered 
 | Our projection model, beating ESPN's on the backtest | Oct 19 ([projections.md](projections.md)) |
 | Our projections in the pages; ESPN's projections and outlooks gone | Oct 21 ([projections-in-app.md](projections-in-app.md)) |
 | Nightly update: our stat windows, in-season blend, injuries, games history | Oct 29 ([nightly-update.md](nightly-update.md)) |
+| Daily league snapshots (M1): rosters, standings, category ranks, player values, injuries | Nov 1 ([snapshots.md](snapshots.md)) |
 | Bonus stats counted: double-doubles, triple-doubles, quadruple-doubles, fouls, foul-outs, misses (was R8, done in full) | Nov 1 ([bonus-stats.md](bonus-stats.md)) |
 | Questions for a lawyer | Oct 28 ([legal-questions.md](legal-questions.md)) |
 
@@ -48,7 +49,7 @@ competitive without gold-plating; everything else last. Moat items are numbered 
 
 | # | Item | Why it blocks release | Size |
 |---|---|---|---|
-| M1 | **Daily league snapshots.** Each morning, keep a dated copy of every league's rosters, standings, category ranks and tiers, and each player's stat line, fantasy value and injury status, in new history tables (today these are overwritten). Re-running a day replaces that day only | The history ESPN doesn't keep is the core moat; every customer day not saved is lost for good. Hindsight grading, tier tracking and archives all need it | M |
+| M1 | ~~Daily league snapshots~~ **Done Nov 1** ([snapshots.md](snapshots.md)) | | |
 | M2 | **Keep history after a lapse.** A lapsed or cancelled league stops refreshing but keeps its history for a set time (e.g. 12 months) so a returning customer finds it intact; deleted on request. Changes R12's purge and goes in R16's privacy policy | Purging on lapse throws the moat away | S |
 
 ### Accounts and payment (Claude, after R3 and R4)

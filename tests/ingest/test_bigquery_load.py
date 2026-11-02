@@ -36,3 +36,37 @@ def test_materialized_refresh_touches_only_these_leagues():
         "WHERE league_id IN (1, 3)"
     )
     assert table_for("v_player_z") == "m_player_z"
+
+
+def test_snapshots_replace_only_that_day_for_these_leagues():
+    import datetime as dt
+
+    from ingest.materialize import SNAPSHOTS, snapshot_statements
+
+    statements = snapshot_statements("p", "d", [3, 1], dt.date(2026, 11, 2))
+    assert len(statements) == 2 * len(SNAPSHOTS)
+    assert statements[0] == (
+        "DELETE FROM `p.d.snap_rosters` WHERE snapshot_date = DATE '2026-11-02' "
+        "AND league_id IN (1, 3)"
+    )
+    assert statements[1].startswith(
+        "INSERT INTO `p.d.snap_rosters` (snapshot_date, league_id, season, team_id, "
+    )
+    assert "SELECT DATE '2026-11-02', league_id" in statements[1]
+    z = next(s for s in statements if s.startswith("INSERT INTO `p.d.snap_player_z`"))
+    assert z.endswith("WHERE league_id IN (1, 3) AND stat_window IN ('season', 'projected')")
+
+
+def test_snapshot_columns_match_the_history_tables():
+    """Each snapshot copies exactly the columns its table defines (sql/ddl), so the
+    history's shape only changes on purpose."""
+    import re
+    from pathlib import Path
+
+    from ingest.materialize import SNAPSHOTS
+
+    ddl = (Path(__file__).resolve().parents[2] / "sql/ddl/19_league_snapshots.sql").read_text()
+    for snap, (_, columns, _) in SNAPSHOTS.items():
+        body = ddl.split(f".{snap}` (", 1)[1].split("\n)", 1)[0]
+        defined = re.findall(r"^\s+(\w+) [A-Z]", body, flags=re.M)
+        assert defined == ["snapshot_date", *columns], snap

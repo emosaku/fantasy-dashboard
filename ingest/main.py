@@ -6,7 +6,8 @@ opened in the last 14 days, or exactly LEAGUE_IDS for a manual refresh. Per leag
 with a random pause between leagues and backoff on every ESPN call, it fetches only
 what changed -- the still-open matchup weeks, activity newer than it already has --
 and replaces that league's rows. Then one refresh of the precomputed m_* tables covers
-all of the task's leagues.
+all of the task's leagues, and that day's snapshots are kept (the history ESPN
+doesn't keep: rosters, standings, category ranks, player values; materialize.py).
 
 ESPN supplies the league itself (settings, teams, rosters, matchups, activity, free
 agents) and the NBA schedule. Player numbers are ours, read once per run from the
@@ -61,9 +62,15 @@ from ingest.espn_client import (
     fetch_views,
     polite,
 )
-from ingest.materialize import MATERIALIZED_VIEWS, refresh_statements, table_for
+from ingest.materialize import (
+    MATERIALIZED_VIEWS,
+    SNAPSHOTS,
+    refresh_statements,
+    snapshot_statements,
+    table_for,
+)
 from ingest.projections import run as projections
-from ingest.projections.nightly import default_as_of
+from ingest.projections.nightly import NBA_TIME, default_as_of
 from ingest.transform import (
     apply_injuries,
     bench_slots,
@@ -285,7 +292,7 @@ def ingest_league(
 def purge_league(league_doc: dict, client, db, cfg: Config) -> None:
     """Delete every row, registry entry and stored credential of a deleted league."""
     league_id = league_doc["league_id"]
-    tables = LEAGUE_TABLES + [table_for(v) for v in MATERIALIZED_VIEWS]
+    tables = LEAGUE_TABLES + [table_for(v) for v in MATERIALIZED_VIEWS] + list(SNAPSHOTS)
     script = ";\n".join(
         f"DELETE FROM `{cfg.project}.{cfg.dataset}.{t}` WHERE league_id = {int(league_id)}"
         for t in tables
@@ -349,9 +356,13 @@ def main(env=os.environ) -> int:
             print(f"league {league_id}: FAILED: {error}", file=sys.stderr)
 
     if done:
-        script = ";\n".join(refresh_statements(cfg.project, cfg.dataset, done))
+        day = now.astimezone(NBA_TIME).date()
+        script = ";\n".join(
+            refresh_statements(cfg.project, cfg.dataset, done)
+            + snapshot_statements(cfg.project, cfg.dataset, done, day)
+        )
         client.query(script).result()
-        print(f"materialized {len(done)} league(s)")
+        print(f"materialized and snapshotted {len(done)} league(s) for {day}")
     return 1 if failed and not done else 0
 
 

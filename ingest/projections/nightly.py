@@ -18,7 +18,8 @@ BallDontLie and ESPN's public player list, never a customer's league.
    ROOKIE_PRIOR_GAMES games (tuned on the 2024-25 and 2025-26 rookie classes).
 5. Games-played history: `player_seasons` (the last HISTORY_SEASONS seasons, by ESPN
    id) from our own games, in place of ESPN's.
-6. Injuries: BallDontLie's current list into `nba_injuries`.
+6. Injuries: BallDontLie's current list into `nba_injuries`, and a dated copy into
+   `nba_injury_history` (the day's list, kept).
 
 Env: GCP_PROJECT_ID, SEASON (required); BIGQUERY_DATASET (league_lab); AS_OF (the
 last day to load, default yesterday in US Eastern time, the NBA's calendar);
@@ -248,11 +249,18 @@ def write_history(bq, project, dataset, season, history_seasons, now) -> int:
     return replace_rows(bq, project, dataset, "player_seasons", rows, "TRUE")
 
 
+def injury_history_rows(rows: pd.DataFrame, day: dt.date) -> pd.DataFrame:
+    return rows.drop(columns="ingested_at").assign(snapshot_date=day)
+
+
 def write_injuries(bdl, bq, project, dataset, now) -> int:
     rows = injury_rows(bdl.injuries(), now)
     if rows.empty:  # an empty list is more likely an outage than a healthy league
         print("injuries: BallDontLie returned none; keeping yesterday's")
         return 0
+    day = now.astimezone(NBA_TIME).date()
+    replace_rows(bq, project, dataset, "nba_injury_history", injury_history_rows(rows, day),
+                 f"snapshot_date = '{day}'")  # fmt: skip
     return replace_rows(bq, project, dataset, "nba_injuries", rows, "TRUE")
 
 
