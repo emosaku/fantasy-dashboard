@@ -235,15 +235,29 @@ def test_our_window_points_use_the_leagues_values():
 
 
 def test_points_check_compares_espns_points_with_ours():
+    def row(pid, window, fp, games, source="espn"):
+        return {"player_id": pid, "stat_window": window, "fp_per_game": fp, "games": games,
+                "source": source}  # fmt: skip
+
     espn = pd.DataFrame([
-        {"player_id": 7, "stat_window": "season", "fp_per_game": 11.05, "source": "espn"},
-        {"player_id": 7, "stat_window": "last_7", "fp_per_game": 25.0, "source": "espn"},
-        {"player_id": 9, "stat_window": "season", "fp_per_game": 2.0, "source": "computed"},
+        row(7, "season", 11.05, 8.0),
+        row(7, "last_7", 25.0, 3.0),
+        row(9, "season", 2.0, 4.0, "computed"),
     ])  # fmt: skip
     ours = transform_window_points(windows(), [7, 9], SCORING, LEAGUE, SEASON, AT)
     off = points_mismatches(espn, ours)
     assert list(off["stat_window"]) == ["last_7"]  # 25 vs 30; 11.05 vs 11 is within 0.1
     assert points_mismatches(espn, ours.iloc[0:0]).empty
+
+
+def test_points_check_skips_windows_where_espn_has_more_games():
+    from ingest.transform import comparable
+
+    espn = pd.DataFrame([{"player_id": 7, "stat_window": "last_7", "fp_per_game": 25.0,
+                          "games": 4.0, "source": "espn"}])  # fmt: skip
+    ours = transform_window_points(windows(), [7], SCORING, LEAGUE, SEASON, AT)  # 3 games
+    assert comparable(espn, ours).empty
+    assert points_mismatches(espn, ours).empty  # tonight's game, not a misread rule
 
 
 def test_injuries_come_from_our_list_and_everyone_else_is_active():
@@ -369,3 +383,28 @@ def test_games_played_scores_once_per_game_and_missing_stats_count_zero():
     scoring = [{"stat": "PTS", "points": 1.0}, {"stat": "GP", "points": 2.0},
                {"stat": "EJ", "points": -5.0}]  # fmt: skip
     assert computed_points(line, scoring) == 22.0
+
+
+def test_points_for_stats_we_cant_count_are_not_flagged():
+    from ingest.transform import points_mismatches, transform_player_points
+
+    scoring = [*SCORING, {"stat": "EJ", "points": -5.0}]
+    avg = {"PTS": 20.0, "FGA": 15.0, "REB": 6.0, "EJ": 0.2}  # ejected in 1 of 5 games
+    espn_side = {"applied_avg": 10.0, "applied_total": 80.0, "avg": avg, "total": {"GP": 8.0}}
+    espn = transform_player_points([make_player(7, {f"{SEASON}_total": espn_side})], scoring,
+                                   LEAGUE, SEASON, AT)  # fmt: skip
+    assert espn.iloc[0]["uncounted_per_game"] == -1.0
+    ours = transform_window_points(windows(), [7], scoring, LEAGUE, SEASON, AT)  # 11.0 a game
+    season = ours.loc[ours["stat_window"] == "season"]
+    assert points_mismatches(espn, season).empty  # 10 + 1 for the ejection = our 11
+    assert len(points_mismatches(espn.drop(columns="uncounted_per_game"), season)) == 1
+
+
+def test_points_alert_fires_only_on_a_large_share():
+    from ingest.transform import ALERT_MARKER, points_alert
+
+    assert points_alert(5, None) is None
+    assert points_alert(5, {"checked": 40, "mismatched": 30}) is None  # too few to judge
+    assert points_alert(5, {"checked": 800, "mismatched": 100}) is None  # 12.5%: normal
+    alert = points_alert(5, {"checked": 800, "mismatched": 300})
+    assert alert.startswith(f"{ALERT_MARKER} league 5: 300 of 800 player windows (38%)")

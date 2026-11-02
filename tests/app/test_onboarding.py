@@ -164,3 +164,9 @@ def test_clean_cookies_tidies_what_was_pasted_and_keeps_encoding():
 def test_clean_cookies_rejects_what_cant_be_a_cookie(s2, swid, problem):
     with pytest.raises(onboarding.CannotRegister, match=problem):
         onboarding.clean_cookies(s2, swid)
+
+
+def test_uncounted_stats_are_labeled_for_people():
+    scoring = ({"stat": "PTS", "points": 1.0}, {"stat": "TF", "points": -2.0},
+               {"stat": "DD", "points": 5.0})  # fmt: skip
+    assert onboarding.uncounted_labels(scoring) == ["technical fouls (TF)"]

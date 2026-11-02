@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit as st
 
 import league
+import onboarding
 from points import data, model
 
 
@@ -15,6 +16,12 @@ def header(title: str):
     if not ctx.is_points:
         st.info("This page is for points leagues.")
         st.stop()
+    uncounted = onboarding.uncounted_labels(ctx.scoring)
+    if uncounted:
+        st.caption(
+            f"This league also gives points for {', '.join(uncounted)}, which League Lab's "
+            "stats source doesn't report. Those points are left out of every number here."
+        )
     return ctx
 
 

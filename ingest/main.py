@@ -74,7 +74,9 @@ from ingest.projections.nightly import NBA_TIME, default_as_of
 from ingest.transform import (
     apply_injuries,
     bench_slots,
+    comparable,
     lineup_slots,
+    points_alert,
     points_mismatches,
     transform_free_agents,
     transform_league_categories,
@@ -226,10 +228,13 @@ def ingest_league(
             rostered + free_agents, scoring, league_id, season, now
         )
         off = points_mismatches(espn_points, actual)
-        points_check = {"checked": int((espn_points["source"] == "espn").sum()),
+        points_check = {"checked": int(len(comparable(espn_points, actual))),
                         "mismatched": int(len(off))}  # fmt: skip
         if len(off):
             print(f"league {league_id}: {len(off)} player windows differ from ESPN's points")
+        alert = points_alert(league_id, points_check)
+        if alert:
+            print(alert, file=sys.stderr)
         stats = sorted(set(PLAYER_STATS) | {s["stat"] for s in scoring})
     else:
         load("league_categories", transform_league_categories(categories, league_id, season, now))

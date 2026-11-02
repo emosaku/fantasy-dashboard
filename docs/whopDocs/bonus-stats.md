@@ -67,9 +67,9 @@ league's full scoring rules on every refresh, so the flags are those rules.
 | Scoring re-read each morning | A bonus added mid-season is counted from the next morning | In place |
 | Uncounted stats per league | Each refresh records `uncounted_stats` on the league | Built |
 | Sign-up warning | Points league: accepted, with a warning naming the uncounted stats. Categories league with such a category: refused | Built |
-| Nightly check against ESPN | ESPN's fantasy points per player compared in memory with ours; gaps above 0.1 a game flagged (`points_check`) | Built |
-| Alert on a jump | Email when a league's flagged share jumps (e.g. above 25%) | Backlog R8a, before release |
-| Note on the pages | Uncounted stats named on the points pages | Backlog R8b, before release |
+| Nightly check against ESPN | ESPN's fantasy points per player compared in memory with ours; gaps above 0.1 a game flagged (`points_check`). ESPN's points for stats we can't count are taken off its side first, and only windows where both count the same games are compared (during the day ESPN already has tonight's games) | Built |
+| Alert on a jump | More than 25% of comparable windows off (at least 50 checked): the ingest logs a `POINTS_CHECK_ALERT` line and the "LeagueLabWhop points check off" policy emails the alert channel (at most hourly). Normal is the providers' small stat corrections: 13% on the live test league today | Built Nov 1 (R8a) |
+| Note on the pages | Uncounted stats named under the title of every points page | Built Nov 1 (R8b) |
 | Weekly total check | ESPN's weekly team scores against our starters' points | Backlog P5, after release |
 
 ## Checked against ESPN
@@ -98,8 +98,6 @@ Top projected double-double rates: Jokic 78% (triple-doubles 46%), Towns 75%, Sa
 
 | Item | When |
 |---|---|
-| Alert when a league's points check jumps (R8a) | Before release |
-| Note on the points pages naming uncounted stats (R8b) | Before release |
 | Ejections, flagrant and technical fouls, games started, team wins (P8) | After release |
 | Weekly total check (P5) | After release |
 | The three foul-outs ESPN doesn't count: check against official box scores | When a customer league scores foul-outs |

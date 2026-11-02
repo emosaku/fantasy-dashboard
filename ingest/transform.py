@@ -10,7 +10,7 @@ import hashlib
 import pandas as pd
 from espn_api.basketball.constant import ACTIVITY_MAP, POSITION_MAP, PRO_TEAM_MAP
 
-from ingest.catalog import PLAYER_STATS, scoring_type
+from ingest.catalog import PLAYER_STATS, scoring_type, uncounted_stats
 
 # ESPN's stat-window keys -> this project's stat_window. Only read for the points
 # check (transform_player_points): every stored window is ours, built from BallDontLie
@@ -26,6 +26,12 @@ WINDOW_SUFFIXES = {
 PROJECTED = "projected"
 NOT_STARTING = {"BE", "IR", "Rookie", ""}  # eligibleSlots that aren't lineup spots
 POINTS_TOLERANCE = 0.1  # our stat x points vs ESPN's applied average, per game
+# Alert when more than this share of a league's checked player windows is off (and at
+# least ALERT_MIN_CHECKED were checked): normal is the providers' small stat
+# corrections, about 10-12% early in the season and shrinking as games accumulate.
+ALERT_SHARE = 0.25
+ALERT_MIN_CHECKED = 50
+ALERT_MARKER = "POINTS_CHECK_ALERT"  # the log-based alert matches this text
 
 
 def _base(league_id: int, season: int, ingested_at: dt.datetime) -> dict:
@@ -249,8 +255,10 @@ def computed_points(avg: dict | None, scoring: list[dict]) -> float | None:
 
 def transform_player_points(players, scoring, league_id, season, ingested_at):
     """ESPN's fantasy points per stat window (appliedAverage, appliedTotal: bonuses
-    included), with stat x points from ESPN's own line beside them. Not stored: only
-    the points check (points_mismatches) reads it, against ours."""
+    included), with stat x points from ESPN's own line beside them, and the part of
+    ESPN's points from stats we can't count (uncounted_per_game: ejections ...). Not
+    stored: only the points check (points_mismatches) reads it, against ours."""
+    uncounted = [s for s in scoring if s["stat"] in set(uncounted_stats(scoring))]
     rows, seen = [], set()
     for player in players:
         if player.playerId in seen:
@@ -280,6 +288,7 @@ def transform_player_points(players, scoring, league_id, season, ingested_at):
                     "fp_total": None if total is None else float(total),
                     "games": None if games is None else float(games),
                     "computed_per_game": ours,
+                    "uncounted_per_game": computed_points(data.get("avg"), uncounted) or 0.0,
                     "source": source,
                 }
             )
@@ -342,15 +351,45 @@ def points_mismatches(espn: pd.DataFrame, ours: pd.DataFrame) -> pd.DataFrame:
     """Player windows where ESPN's applied average and our fantasy points (our games x
     the league's values) differ by more than POINTS_TOLERANCE: a misread scoring rule, a
     game one side has and the other doesn't, or a bonus stat (double-doubles) our line
-    doesn't carry. espn: transform_player_points; ours: transform_window_points."""
+    doesn't carry. espn: transform_player_points; ours: transform_window_points. The
+    points ESPN gives for stats we can't count (uncounted_per_game) are expected to be
+    missing from ours, so they're taken off ESPN's side first: only unexplained gaps
+    are flagged. Only windows where both count the same games are compared (comparable):
+    during the day ESPN already has tonight's games and ours don't."""
     if espn.empty or ours.empty:
         return pd.DataFrame(columns=["player_id", "stat_window", "espn", "ours"])
     keys = ["player_id", "stat_window"]
-    both = espn.loc[espn["source"] == "espn", [*keys, "fp_per_game"]].merge(
+    espn = comparable(espn, ours).copy()
+    if "uncounted_per_game" in espn:
+        espn["fp_per_game"] = espn["fp_per_game"] - espn["uncounted_per_game"].fillna(0)
+    both = espn[[*keys, "fp_per_game"]].merge(
         ours[[*keys, "fp_per_game"]], on=keys, suffixes=("_espn", "_ours")
     )
     both = both.rename(columns={"fp_per_game_espn": "espn", "fp_per_game_ours": "ours"})
     return both.loc[(both["espn"] - both["ours"]).abs() > POINTS_TOLERANCE]
+
+
+def comparable(espn: pd.DataFrame, ours: pd.DataFrame) -> pd.DataFrame:
+    """ESPN's own-points rows (source espn) whose window has the same games as ours."""
+    keys = ["player_id", "stat_window"]
+    rows = espn.loc[espn["source"] == "espn"]
+    if ours.empty:
+        return rows.iloc[0:0]
+    games = rows[[*keys, "games"]].merge(ours[[*keys, "games"]], on=keys, suffixes=("", "_ours"))
+    same = games.loc[games["games"] == games["games_ours"], keys]
+    return rows.merge(same, on=keys)
+
+
+def points_alert(league_id: int, check: dict | None) -> str | None:
+    """The alert line for a league whose points check is off too often, else None."""
+    if not check or check["checked"] < ALERT_MIN_CHECKED:
+        return None
+    share = check["mismatched"] / check["checked"]
+    if share <= ALERT_SHARE:
+        return None
+    return (f"{ALERT_MARKER} league {league_id}: {check['mismatched']} of {check['checked']} "
+            f"player windows ({share:.0%}) differ from ESPN's fantasy points by more than "
+            f"{POINTS_TOLERANCE} a game; a scoring rule may be misread")  # fmt: skip
 
 
 def _pool_windows(windows: pd.DataFrame, player_ids) -> pd.DataFrame:

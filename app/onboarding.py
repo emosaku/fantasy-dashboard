@@ -71,6 +71,12 @@ def clean_cookies(espn_s2: str, swid: str) -> dict:
     return {"espn_s2": s2, "SWID": sw}
 
 
+def uncounted_labels(scoring) -> list[str]:
+    """The stats a points league scores that League Lab can't count, labeled for
+    people: ["ejections (EJ)", ...]."""
+    return [f"{describe_stat(s)} ({s})" for s in uncounted_stats(list(scoring))]
+
+
 def team_name(team: dict) -> str:
     name = team.get("name") or f"{team.get('location', '')} {team.get('nickname', '')}"
     return " ".join(name.split()) or f"Team {team.get('id')}"
@@ -123,7 +129,7 @@ def preview(league_id: int, season: int, fetch=fetch_views, cookies: dict | None
         "format": fmt,
         "categories": categories,
         "scoring": scoring,
-        "uncounted": [f"{describe_stat(s)} ({s})" for s in uncounted_stats(scoring)],
+        "uncounted": uncounted_labels(scoring),
         "teams": teams,
         "private": cookies is not None,
         "my_team": my_team,
