@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS `{project}.{dataset}.nba_player_games` (
   min FLOAT64, pts FLOAT64, reb FLOAT64, oreb FLOAT64, dreb FLOAT64, ast FLOAT64,
   stl FLOAT64, blk FLOAT64, tov FLOAT64, fgm FLOAT64, fga FLOAT64, fg3m FLOAT64,
   fg3a FLOAT64, ftm FLOAT64, fta FLOAT64,
+  pf FLOAT64,                         -- personal fouls (bonus stats: PF, DQ)
   ingested_at TIMESTAMP NOT NULL
 )
 PARTITION BY RANGE_BUCKET(season, GENERATE_ARRAY(2000, 2100, 1))

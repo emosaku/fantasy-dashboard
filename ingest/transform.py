@@ -237,10 +237,14 @@ def bench_slots(raw_settings: dict) -> int:
 
 def computed_points(avg: dict | None, scoring: list[dict]) -> float | None:
     """Fantasy points per game from a per-game stat line and the league's values;
-    None without a line."""
+    None without a line. Games played is worth its points once per game (the line's GP
+    counts games in the window); a stat the line doesn't carry counts 0."""
     if not avg:
         return None
-    return sum(float(avg.get(s["stat"]) or 0) * s["points"] for s in scoring)
+    return sum(
+        (1.0 if s["stat"] == "GP" else float(avg.get(s["stat"]) or 0)) * s["points"]
+        for s in scoring
+    )
 
 
 def transform_player_points(players, scoring, league_id, season, ingested_at):

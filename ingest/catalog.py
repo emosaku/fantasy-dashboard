@@ -11,14 +11,17 @@ Each supported category is either:
   * count -- one per-game stat (PTS, REB, TO ...), or
   * ratio -- one total over another (FG% = FGM / FGA, A/TO = AST / TO), always
              recomputed from the totals, never averaged.
-Everything is built from the per-game averages ESPN gives for each player, so a
-category ESPN doesn't average (double-doubles, triple-doubles ...) can't be supported
-yet: a league scoring one is refused at registration with a clear message.
+Everything is built from per-game averages of our own box scores. Beyond the 15 core
+stats, the extra stats (EXTRA_COUNT: double-, triple- and quadruple-doubles, personal
+fouls, foul-outs, missed shots) are counted game by game, so they work as categories
+too (docs/whopDocs/bonus-stats.md). A category we can't count at all (ejections,
+technical fouls ...) is refused at registration with a clear message.
 
 Points leagues: every stat is worth a set number of points (scoringItems[].points)
-and the higher weekly total wins. ESPN computes each player's fantasy points itself,
-bonuses included; League Lab keeps the point values for breakdowns and to check its
-own math against ESPN's. A league whose point values change by lineup slot
+and the higher weekly total wins. League Lab computes each player's fantasy points
+from our stats and the league's point values, and checks them against ESPN's. A
+scored stat we can't count (uncounted_stats) doesn't refuse the league: it's shown at
+sign-up and recorded on the league. A league whose point values change by lineup slot
 (pointsOverrides) is refused.
 """
 
@@ -37,6 +40,11 @@ class CategoryDef:
 
 COUNT = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "TO", "FGM", "FGA", "FTM", "FTA", "3PA",
          "OREB", "DREB", "MIN"]  # fmt: skip
+# Stats beyond the 15 that our box scores can count (ingest/projections/games.py)
+EXTRA_COUNT = ["DD", "TD", "QD", "PF", "DQ", "FGMI", "FTMI", "3PMI"]
+# Stats ESPN offers that our stats source doesn't report, for people
+UNAVAILABLE = {"EJ": "ejections", "FF": "flagrant fouls", "TF": "technical fouls",
+               "GS": "games started", "TW": "team wins"}  # fmt: skip
 RATIO = {
     "FG%": ("FGM", "FGA"),
     "FT%": ("FTM", "FTA"),
@@ -44,7 +52,7 @@ RATIO = {
     "A/TO": ("AST", "TO"),
 }
 
-CATALOG = {c: CategoryDef(c, "count", c) for c in COUNT} | {
+CATALOG = {c: CategoryDef(c, "count", c) for c in [*COUNT, *EXTRA_COUNT]} | {
     c: CategoryDef(c, "ratio", num, den) for c, (num, den) in RATIO.items()
 }
 
@@ -128,6 +136,19 @@ def league_scoring(scoring_settings: dict) -> list[dict]:
     if not out:
         raise UnsupportedLeague("This league gives no points for any stat.")
     return out
+
+
+COUNTED = set(COUNT) | set(EXTRA_COUNT) | {"GP"}
+
+
+def uncounted_stats(scoring: list[dict]) -> list[str]:
+    """The stats a points league scores that League Lab can't count: they add 0 to
+    every player's fantasy points, so the league is told at sign-up."""
+    return [s["stat"] for s in scoring if s["stat"] not in COUNTED]
+
+
+def describe_stat(stat: str) -> str:
+    return UNAVAILABLE.get(stat, stat)
 
 
 def league_categories(scoring_settings: dict) -> list[dict]:

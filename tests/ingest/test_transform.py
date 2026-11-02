@@ -360,3 +360,12 @@ def test_no_projections_yet_adds_nothing():
     empty = pd.DataFrame(columns=["PTS", "GP"])
     assert transform_projected_stats(empty, [7], LEAGUE, SEASON, AT).empty
     assert transform_projected_points(None, [7], SCORING, LEAGUE, SEASON, AT).empty
+
+
+def test_games_played_scores_once_per_game_and_missing_stats_count_zero():
+    from ingest.transform import computed_points
+
+    line = {"PTS": 20.0, "GP": 10.0}
+    scoring = [{"stat": "PTS", "points": 1.0}, {"stat": "GP", "points": 2.0},
+               {"stat": "EJ", "points": -5.0}]  # fmt: skip
+    assert computed_points(line, scoring) == 22.0

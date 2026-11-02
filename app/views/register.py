@@ -152,6 +152,13 @@ if preview["format"] == "points":
         f"This league plays **head-to-head points**. League Lab will run its points tools "
         f"for the {season_label} season, and the format can't change until next season."
     )
+    if preview.get("uncounted"):
+        missing = ", ".join(preview["uncounted"])
+        st.warning(
+            f"This league gives points for {missing}, which League Lab's stats source "
+            "doesn't report. Those points are left out of every player's numbers, so "
+            "players who earn them will look slightly worse than they are."
+        )
 else:
     scoring = (
         "Each Category" if preview["scoring_type"] == "H2H_EACH_CATEGORY" else "Most Categories"

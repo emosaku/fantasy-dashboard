@@ -49,3 +49,30 @@ def test_stat_names_round_trip_through_table_columns():
     assert {"fg3m", "fg3a", "tov", "gp"} <= set(columns)
     assert not any(c[0].isdigit() for c in columns)
     assert list(from_columns(columns)) == list(frame)
+
+
+def test_bonuses_are_counted_game_by_game():
+    from ingest.projections.games import with_bonus
+
+    games = pd.DataFrame([
+        game(1, "2026-10-21", 36, 25) | {"REB": 12.0, "PF": 6.0},  # double-double, fouled out
+        game(1, "2026-10-23", 36, 15) | {"REB": 11, "AST": 10, "PF": 2.0},  # triple-double
+        game(1, "2026-10-25", 36, 9) | {"REB": 30, "PF": 1.0},  # 9 points: not one
+    ])  # fmt: skip
+    games["FGA"], games["FGM"] = 20.0, 8.0
+    rows = with_bonus(games)
+    assert list(rows["DD"]) == [1, 1, 0]  # a triple-double is also a double-double
+    assert list(rows["TD"]) == [0, 1, 0]
+    assert list(rows["DQ"]) == [1, 0, 0]
+    assert list(rows["FGMI"]) == [12, 12, 12]
+
+
+def test_windows_carry_bonus_rates_and_skip_fouls_never_loaded():
+    games = pd.DataFrame([
+        game(1, "2026-10-21", 36, 25) | {"REB": 12.0},
+        game(1, "2026-10-23", 36, 15),
+    ])  # fmt: skip
+    long = window_lines(games, 2027, dt.date(2026, 10, 25))
+    season = long.loc[long["stat_window"] == "season"].set_index("stat")["value"]
+    assert season["DD"] == 0.5 and season["TD"] == 0
+    assert "PF" not in season and "DQ" not in season  # no foul counts: no row, not 0

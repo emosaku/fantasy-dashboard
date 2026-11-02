@@ -10,11 +10,12 @@ BallDontLie and ESPN's public player list, never a customer's league.
    list by name (people.match), so a rookie or call-up reaches the pages once he plays.
    Ids already linked are never changed or reused.
 4. The in-season blend: the preseason projection mixed with the season so far
-   (blend.py), written to `projections` as kind "blended". `league-ingest` reads the
-   newest run, so the pages' "projected" window moves with the season. A player with
-   games but no preseason projection (a rookie) starts from a league-average line
-   instead, so one big night doesn't make him a star; his minutes follow his own
-   after ROOKIE_PRIOR_GAMES games (tuned on the 2024-25 and 2025-26 rookie classes).
+   (blend.py), plus each player's projected bonus stats (bonus.py), written to
+   `projections` as kind "blended". `league-ingest` reads the newest run, so the
+   pages' "projected" window moves with the season. A player with games but no
+   preseason projection (a rookie) starts from a league-average line instead, so one
+   big night doesn't make him a star; his minutes follow his own after
+   ROOKIE_PRIOR_GAMES games (tuned on the 2024-25 and 2025-26 rookie classes).
 5. Games-played history: `player_seasons` (the last HISTORY_SEASONS seasons, by ESPN
    id) from our own games, in place of ESPN's.
 6. Injuries: BallDontLie's current list into `nba_injuries`.
@@ -35,6 +36,7 @@ from google.cloud import bigquery
 from ingest.bigquery_load import in_list, replace_rows
 from ingest.projections import people
 from ingest.projections.blend import blend
+from ingest.projections.bonus import add_bonus, bonus_rates
 from ingest.projections.games import COLUMNS, STATS, from_columns, to_columns
 from ingest.projections.model import DEFAULT, RATE_STATS, league_rates
 from ingest.projections.run import MODEL_VERSION, PRESEASON, load_history
@@ -150,10 +152,11 @@ def teams_now(games: pd.DataFrame, players: pd.DataFrame, season: int) -> pd.Ser
     return latest.combine_first(listed)
 
 
-def blended_rows(seasons, preseason, teams, left, season, made_at) -> pd.DataFrame:
+def blended_rows(seasons, preseason, teams, left, season, made_at, bonus=None) -> pd.DataFrame:
     """The in-season projection for every player with a preseason line or games this
     season, in the projections table's shape. gp is his projected games for the whole
-    season (played so far + projected the rest of the way), as in a preseason row."""
+    season (played so far + projected the rest of the way), as in a preseason row.
+    bonus: bonus_rates' (rates, league) for the bonus stats; without it they're empty."""
     to_date = seasons.loc[seasons["season"] == season]
     known = seasons.loc[seasons["season"] < season]
     missing = set(to_date["player_id"]) - set(preseason["player_id"])
@@ -175,6 +178,8 @@ def blended_rows(seasons, preseason, teams, left, season, made_at) -> pd.DataFra
     ], ignore_index=True)  # fmt: skip
     played = to_date.set_index("player_id")["GP"].reindex(lines["player_id"]).fillna(0)
     lines["GP"] = lines["GP"].to_numpy() + played.to_numpy()
+    if bonus is not None:
+        lines = add_bonus(lines, *bonus)
     rows = to_columns(lines)
     rows["season"] = season
     ages = preseason.set_index("player_id").get("age")
@@ -207,7 +212,13 @@ def make_blended(bdl, bq, project, dataset, season, as_of, now) -> int:
     ).to_dataframe()
     players = bq.query(f"SELECT player_id, team FROM {table}.nba_players`").to_dataframe()
     left = games_left(bdl.games(season), as_of)
-    rows = blended_rows(seasons, preseason, teams_now(games, players, season), left, season, now)
+    stats = ", ".join(COLUMNS[s] for s in [*STATS, "PF"])
+    recent = from_columns(bq.query(
+        f"SELECT player_id, season, {stats} FROM {table}.nba_player_games` "
+        f"WHERE season BETWEEN {int(season) - 2} AND {int(season)} AND min > 0"
+    ).to_dataframe())  # fmt: skip
+    rows = blended_rows(seasons, preseason, teams_now(games, players, season), left, season, now,
+                        bonus_rates(recent, season))  # fmt: skip
     scope = (f"season = {int(season)} AND kind = '{BLENDED}' "
              f"AND DATE(made_at) = '{now.date()}'")  # fmt: skip
     replace_rows(bq, project, dataset, "projections", rows, scope)

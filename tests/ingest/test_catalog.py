@@ -10,6 +10,7 @@ from ingest.catalog import (
     league_format,
     league_scoring,
     scoring_type,
+    uncounted_stats,
 )
 
 # ESPN stat ids: 19 FG%, 20 FT%, 17 3PM, 6 REB, 3 AST, 2 STL, 1 BLK, 11 TO, 0 PTS.
@@ -67,8 +68,21 @@ def test_other_formats_are_refused(scoring_type):
 
 
 def test_unsupported_categories_are_named():
-    with pytest.raises(UnsupportedLeague, match="DD"):
-        league_categories(settings([0, 37]))  # 37: double-doubles
+    with pytest.raises(UnsupportedLeague, match="TF"):
+        league_categories(settings([0, 10]))  # 10: technical fouls, not in our stats
+
+
+def test_bonus_categories_are_counted_per_game():
+    cats = league_categories(settings([0, 37, 38, 9]))  # PTS, DD, TD, PF
+    assert [(c["category"], c["kind"], c["num_stat"]) for c in cats][1:] == [
+        ("DD", "count", "DD"), ("TD", "count", "TD"), ("PF", "count", "PF"),
+    ]  # fmt: skip
+    assert {"DD", "TD", "QD", "PF", "DQ", "FGMI"} <= set(PLAYER_STATS)
+
+
+def test_points_stats_we_cant_count_are_listed():
+    scoring = [{"stat": s, "points": 1.0} for s in ("PTS", "DD", "FGMI", "GP", "EJ", "GS")]
+    assert uncounted_stats(scoring) == ["EJ", "GS"]
 
 
 def test_every_category_input_is_ingested():

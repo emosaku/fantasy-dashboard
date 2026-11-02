@@ -87,8 +87,8 @@ st.dataframe(
 st.subheader("Points a week by source")
 st.caption(
     "Where each team's projected weekly points come from: each starter's per-game points "
-    "from each stat, times how often he starts. Shaded by rank in each column. Bonuses "
-    "like double-doubles aren't counted yet."
+    "from each stat, times how often he starts. Shaded by rank in each column. Other "
+    "holds bonuses like double-doubles and any other stat the league scores."
 )
 src = pd.DataFrame(by_source).T.reindex(table["team_id"])
 src = src.loc[:, (src.abs() > 1e-9).any()]

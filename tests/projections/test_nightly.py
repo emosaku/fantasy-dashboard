@@ -108,3 +108,15 @@ def test_no_rookies_is_fine():
     rows = blended_rows(veterans, preseason(), pd.Series({1: "DEN", 2: "LAL"}),
                         pd.Series({"DEN": 75, "LAL": 76}), 2027, NOW)  # fmt: skip
     assert set(rows["player_id"]) == {1, 2}
+
+
+def test_blended_rows_carry_projected_bonuses():
+    from ingest.projections.bonus import bonus_rates
+
+    recent = history().assign(REB=0.0)  # season lines stand in for games here
+    rates, league = bonus_rates(recent.assign(PF=3.0), 2027)
+    rows = blended_rows(history(), preseason(), pd.Series({1: "DEN", 2: "LAL", 9: "SAS"}),
+                        pd.Series({"DEN": 75, "LAL": 76, "SAS": 77}), 2027, NOW,
+                        (rates, league)).set_index("player_id")  # fmt: skip
+    assert {"dd", "td", "qd", "pf", "dq"} <= set(rows.columns)
+    assert rows["pf"].notna().all()

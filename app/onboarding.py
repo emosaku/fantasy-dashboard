@@ -19,8 +19,10 @@ from ingest.catalog import (
     UnsupportedLeague,
     league_categories,
     league_format,
+    describe_stat,
     league_scoring,
     scoring_type,
+    uncounted_stats,
 )
 from ingest.espn_client import LeagueNotAccessible, fetch_views
 
@@ -75,8 +77,8 @@ def team_name(team: dict) -> str:
 
 
 def preview(league_id: int, season: int, fetch=fetch_views, cookies: dict | None = None) -> dict:
-    """{league_name, scoring_type, format, categories, scoring, teams, private, my_team}
-    for a league
+    """{league_name, scoring_type, format, categories, scoring, uncounted (scored stats
+    League Lab can't count, labeled for people), teams, private, my_team} for a league
     League Lab can add; raises CannotRegister (NeedsLogin for a private league without
     a login) otherwise. my_team is the team the login's owner manages (None without a
     login, or for a league member with no team)."""
@@ -121,6 +123,7 @@ def preview(league_id: int, season: int, fetch=fetch_views, cookies: dict | None
         "format": fmt,
         "categories": categories,
         "scoring": scoring,
+        "uncounted": [f"{describe_stat(s)} ({s})" for s in uncounted_stats(scoring)],
         "teams": teams,
         "private": cookies is not None,
         "my_team": my_team,

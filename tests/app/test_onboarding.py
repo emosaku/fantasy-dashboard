@@ -97,8 +97,15 @@ def test_other_formats_are_refused(scoring_type):
 
 
 def test_unsupported_category_is_named():
-    with pytest.raises(onboarding.CannotRegister, match="DD"):
-        onboarding.preview(1, 2026, espn(items=[*ITEMS, {"statId": 37}]))
+    with pytest.raises(onboarding.CannotRegister, match="TF"):
+        onboarding.preview(1, 2026, espn(items=[*ITEMS, {"statId": 10}]))
+
+
+def test_points_stats_we_cant_count_are_shown_not_refused():
+    items = [*POINT_ITEMS, {"statId": 7, "points": -5.0}]  # 7: ejections
+    out = onboarding.preview(1, 2026, espn("H2H_POINTS", items))
+    assert out["uncounted"] == ["ejections (EJ)"]
+    assert onboarding.preview(1, 2026, espn("H2H_POINTS", POINT_ITEMS))["uncounted"] == []
 
 
 # --- Private leagues (Phase 2) -----------------------------------------------------

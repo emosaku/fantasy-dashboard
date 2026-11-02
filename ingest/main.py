@@ -49,6 +49,7 @@ from ingest.catalog import (
     league_format,
     league_scoring,
     scoring_type,
+    uncounted_stats,
 )
 from ingest.credentials import EXPIRED, NeedsLogin, cookies_for
 from ingest.espn_client import (
@@ -261,6 +262,7 @@ def ingest_league(
         "scoring_type": scoring_type(raw["scoringSettings"]),
         "categories": categories,
         "scoring": scoring,
+        "uncounted_stats": uncounted_stats(scoring),
         "lineup_slots": lineup_slots(raw) if points else {},
         "bench_slots": bench_slots(raw) if points else 0,
         "points_check": points_check,

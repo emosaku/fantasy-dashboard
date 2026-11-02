@@ -18,12 +18,14 @@ from google.cloud import bigquery
 
 from ingest.bigquery_load import replace_rows
 from ingest.projections.games import (
+    BONUS,
     COLUMNS,
     STATS,
     from_columns,
     season_lines,
     to_columns,
     window_lines,
+    with_misses,
 )
 from ingest.projections.model import DEFAULT, fit_aging, project
 
@@ -65,14 +67,14 @@ def make_preseason(client, project: str, dataset: str, season: int, made_at) -> 
 def latest(client, project: str, dataset: str, season: int) -> pd.DataFrame:
     """The newest run's per-game lines for `season`, indexed by ESPN player id, in
     League Lab's stat names (GP = projected games). Empty if there's none yet."""
-    columns = ", ".join(f"p.{COLUMNS[s]}" for s in [*STATS, "GP"])
+    columns = ", ".join(f"p.{COLUMNS[s]}" for s in [*STATS, "GP", *BONUS])
     sql = (
         f"SELECT n.espn_player_id, {columns} FROM `{project}.{dataset}.projections` p "
         f"JOIN `{project}.{dataset}.nba_players` n USING (player_id) "
         f"WHERE p.season = {int(season)} AND n.espn_player_id IS NOT NULL "
         "QUALIFY p.made_at = MAX(p.made_at) OVER ()"
     )
-    lines = from_columns(client.query(sql).to_dataframe())
+    lines = with_misses(from_columns(client.query(sql).to_dataframe()))
     if lines.empty:
         return pd.DataFrame(columns=[*STATS, "GP"])
     lines["espn_player_id"] = lines["espn_player_id"].astype("int64")
@@ -82,7 +84,7 @@ def latest(client, project: str, dataset: str, season: int) -> pd.DataFrame:
 def windows(client, project: str, dataset: str, season: int, as_of: dt.date) -> pd.DataFrame:
     """Per-game lines in window_lines' long shape (player_id = ESPN's id, stat_window,
     stat, value) for the season so far and the last 30/15/7 days up to `as_of`."""
-    stats = ", ".join(f"g.{COLUMNS[s]}" for s in STATS)
+    stats = ", ".join(f"g.{COLUMNS[s]}" for s in [*STATS, "PF"])
     games = client.query(
         f"SELECT n.espn_player_id AS player_id, g.season, g.game_date, {stats} "
         f"FROM `{project}.{dataset}.nba_player_games` g "

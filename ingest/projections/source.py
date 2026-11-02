@@ -30,7 +30,7 @@ MIN_INTERVAL = 1.05  # seconds between requests: just under 60 a minute
 RETRIES = 5
 BACKOFF_SECONDS = 5.0
 GAME_COLUMNS = ["min", "pts", "reb", "oreb", "dreb", "ast", "stl", "blk", "tov", "fgm", "fga",
-                "fg3m", "fg3a", "ftm", "fta"]  # fmt: skip
+                "fg3m", "fg3a", "ftm", "fta", "pf"]  # fmt: skip
 
 
 def api_key(project: str) -> str:

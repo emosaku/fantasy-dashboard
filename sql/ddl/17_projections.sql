@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS `{project}.{dataset}.projections` (
   min FLOAT64, pts FLOAT64, reb FLOAT64, oreb FLOAT64, dreb FLOAT64, ast FLOAT64,
   stl FLOAT64, blk FLOAT64, tov FLOAT64, fgm FLOAT64, fga FLOAT64, fg3m FLOAT64,
   fg3a FLOAT64, ftm FLOAT64, fta FLOAT64,
+  dd FLOAT64, td FLOAT64, qd FLOAT64, pf FLOAT64, dq FLOAT64,  -- bonus stats per game
   age FLOAT64,
   history_minutes FLOAT64
 )
