@@ -7,8 +7,9 @@ BallDontLie and ESPN's public player list, never a customer's league.
    loaded yet, the whole season so far.
 2. Players: anyone in those games that `nba_players` doesn't know yet is added.
 3. Linking: this season's players without an ESPN id are matched to ESPN's player
-   list by name (people.match), so a rookie or call-up reaches the pages once he plays.
-   Ids already linked are never changed or reused.
+   list by name (people.match), then by name and current team (people.match_by_team),
+   so a rookie or call-up reaches the pages once he plays. Ids already linked are never
+   changed or reused.
 4. The in-season blend: the preseason projection mixed with the season so far
    (blend.py), plus each player's projected bonus stats (bonus.py), written to
    `projections` as kind "blended". `league-ingest` reads the newest run, so the
@@ -104,11 +105,19 @@ def add_new_players(bdl, bq, project, dataset, season, now) -> int:
 
 
 def links(players: pd.DataFrame, espn: pd.DataFrame) -> pd.DataFrame:
-    """ESPN ids for `players` (player_id, player_name, draft_year) from ESPN's list,
-    never one already linked to someone else: player_id, espn_player_id."""
+    """ESPN ids for `players` (player_id, player_name, draft_year, and team: his
+    current team) from ESPN's list (espn_player_id, name, team), never one already
+    linked to someone else: player_id, espn_player_id. By name first; then, for the
+    rest, by name and team."""
     wiki = pd.DataFrame(columns=["item", "espn_player_id", "birth_date", "name"])
     found = people.match(players, wiki, espn)
-    return found.dropna(subset=["espn_player_id"])[["player_id", "espn_player_id"]]
+    found = found.dropna(subset=["espn_player_id"])[["player_id", "espn_player_id"]]
+    if "team" not in players or "team" not in espn:
+        return found
+    rest = players.loc[~players["player_id"].isin(found["player_id"])]
+    free = espn.loc[~espn["espn_player_id"].isin(found["espn_player_id"])]
+    by_team = people.match_by_team(rest[["player_id", "player_name", "team"]], free)
+    return pd.concat([found, by_team], ignore_index=True)
 
 
 def link_players(bq, project, dataset, season) -> pd.DataFrame:
@@ -121,12 +130,19 @@ def link_players(bq, project, dataset, season) -> pd.DataFrame:
     need = players.loc[players["player_id"].isin(playing) & players["espn_player_id"].isna()]
     if need.empty:
         return need
+    games = bq.query(
+        f"SELECT player_id, season, game_date, team FROM {table}.nba_player_games` "
+        f"WHERE season = {int(season)} AND min > 0"
+    ).to_dataframe()
+    current = teams_now(games, players[["player_id", "team"]], season)
+    need = need.assign(team=need["player_id"].map(current))
     espn = people.fetch_espn_players(season)
     espn = espn.loc[~espn["espn_player_id"].isin(players["espn_player_id"].dropna())]
     found = links(need, espn)
     unlinked = need.loc[~need["player_id"].isin(found["player_id"]), "player_name"]
     if not found.empty:
-        rows = need.drop(columns="espn_player_id").merge(found, on="player_id")
+        rows = need.drop(columns=["espn_player_id", "team"]).merge(found, on="player_id")
+        rows = rows.merge(players[["player_id", "team"]], on="player_id")
         replace_rows(bq, project, dataset, "nba_players", rows,
                      in_list("player_id", list(rows["player_id"])))  # fmt: skip
     print(f"linked {len(found)} new ESPN ids; still unlinked: {', '.join(unlinked) or 'none'}")

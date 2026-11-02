@@ -40,7 +40,7 @@ competitive without gold-plating; everything else last. Moat items are numbered 
 
 | # | Item | Why it blocks release | Size |
 |---|---|---|---|
-| R7 | **Use team when linking players to ESPN.** Break same-name ties by current team (Jaylin Williams, OKC) and accept a near-match name when the team agrees (ESPN's "David Jones Garcia") | Rostered players currently show no stats, which looks broken to a paying customer | S |
+| R7 | ~~Use team when linking players to ESPN~~ **Done Nov 1**: Jaylin Williams (OKC) and David Jones (ESPN's "David Jones Garcia") linked ([nightly-update.md](nightly-update.md)) | | |
 | R8 | ~~Double-doubles in points leagues~~ **Done Nov 1**, actual and projected ([bonus-stats.md](bonus-stats.md)) | | |
 | R8a | **Alert when a league's points check jumps** (say above 25% of players off by more than 0.1 a game): a scoring rule is probably misread | It's how we'd learn a paying league is counted wrong | S |
 | R8b | **Note on the points pages** naming any scored stats we can't count (ejections, technicals ...), not only at sign-up | The sign-up warning is easy to forget | S |

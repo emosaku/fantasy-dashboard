@@ -21,6 +21,11 @@ unmatched rather than guessed. And in every pass, a candidate whose birth date c
 be our player's is never taken, even alone (Gerald Henderson Sr. for his son). Only
 players with NBA games should be passed in: BallDontLie's player list also holds other
 leagues' players with the same names.
+
+In season, a last pass uses the player's current team (match_by_team): among ESPN's
+players on the same NBA team, one whose name is ours, contains ours or shares our last
+name and first initial. That settles two players sharing a name (Jaylin Williams of
+OKC, not the free agent) and a name ESPN writes longer ("David Jones Garcia").
 """
 
 import json
@@ -80,15 +85,35 @@ def fetch_wikidata(session: requests.Session | None = None) -> pd.DataFrame:
     return frame.drop_duplicates("item").reset_index(drop=True)
 
 
+# ESPN's team codes that differ from BallDontLie's
+ESPN_TEAMS = {"PHL": "PHI", "PHO": "PHX"}
+
+
+def espn_team(pro_team_id) -> str | None:
+    """BallDontLie's code for ESPN's proTeamId; None for a free agent (0) or unknown."""
+    from espn_api.basketball.constant import PRO_TEAM_MAP
+
+    code = PRO_TEAM_MAP.get(int(pro_team_id or 0))
+    return None if code in (None, "FA") else ESPN_TEAMS.get(code, code)
+
+
 def fetch_espn_players(season: int) -> pd.DataFrame:
-    """ESPN's full player list for a season: espn_player_id, name."""
+    """ESPN's full player list for a season: espn_player_id, name, team (BallDontLie's
+    code; None for a free agent)."""
     from ingest.espn_client import _get
 
     # without the filter header ESPN returns only 50 players
     headers = {"x-fantasy-filter": json.dumps({"filterActive": None})}
     data = _get(ESPN_PLAYERS.format(season=season), {"view": "players_wl"}, headers, None)
     return pd.DataFrame(
-        [{"espn_player_id": int(p["id"]), "name": p.get("fullName")} for p in data]
+        [
+            {
+                "espn_player_id": int(p["id"]),
+                "name": p.get("fullName"),
+                "team": espn_team(p.get("proTeamId")),
+            }
+            for p in data
+        ]  # fmt: skip
     ).drop_duplicates("espn_player_id")
 
 
@@ -230,3 +255,30 @@ def match(players: pd.DataFrame, wikidata: pd.DataFrame, espn: pd.DataFrame | No
     out.loc[shared, "espn_player_id"] = pd.NA
     out = out.loc[out["espn_player_id"].notna() | out["birth_date"].notna()]
     return out[COLUMNS].reset_index(drop=True)
+
+
+def _same_person(ours: str, theirs: str) -> bool:
+    """Names that can be one person once the team agrees: equal; one contains the
+    other's every word (David Jones / David Jones Garcia); or the same last name and
+    first initial (Nic / Nicolas)."""
+    a, b = normalize(ours).split(), normalize(theirs).split()
+    if not a or not b:
+        return False
+    if a == b or set(a) <= set(b) or set(b) <= set(a):
+        return True
+    return a[-1] == b[-1] and a[0][0] == b[0][0]
+
+
+def match_by_team(players: pd.DataFrame, espn: pd.DataFrame) -> pd.DataFrame:
+    """players: (player_id, player_name, team) -- his current team; espn: (espn_player_id,
+    name, team). Each player linked to the one ESPN player on his team whose name fits
+    (_same_person); none when zero or several fit, or when that ESPN player would fit
+    two of ours. Returns player_id, espn_player_id."""
+    pairs = players.dropna(subset=["team"]).merge(
+        espn.dropna(subset=["team"]), on="team", suffixes=("", "_espn")
+    )
+    pairs = pairs.loc[[_same_person(a, b) for a, b in zip(pairs["player_name"], pairs["name"],
+                                                           strict=True)]]  # fmt: skip
+    pairs = pairs.loc[pairs.groupby("player_id")["espn_player_id"].transform("size") == 1]
+    pairs = pairs.loc[pairs.groupby("espn_player_id")["player_id"].transform("size") == 1]
+    return pairs[["player_id", "espn_player_id"]].reset_index(drop=True)

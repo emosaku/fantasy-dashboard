@@ -139,8 +139,11 @@ gcloud run jobs execute nba-nightly --region us-west1 --project league-lab-whop
 
 1. **Rookies run about 2 fantasy points a game low** (above). A rookie model using draft
    slot and college stats is still a later item.
-2. **Two players aren't linked** (Jaylin Williams, David Jones), so they show no stats.
-   One manual alias each would fix it if they matter to a customer's league.
+2. ~~**Two players aren't linked**~~ Fixed November 1 (R7): linking now has a last pass
+   by current team. Among ESPN's players on his NBA team, one whose name is his,
+   contains his, or shares his last name and first initial is taken, and only when
+   exactly one fits. Jaylin Williams (OKC, not the free agent of the same name) and David
+   Jones (ESPN's "David Jones Garcia") are linked.
 3. **Bonus stats** (double-doubles, triple-doubles) count 0 in a points league, as
    before; the points check flags players who earn them.
 4. **The NBA schedule still comes from ESPN** for the points pages; BallDontLie's

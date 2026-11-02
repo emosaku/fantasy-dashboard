@@ -136,3 +136,52 @@ def test_undrafted_players_are_checked_against_their_first_season():
     candidates = wiki([(1, dt.date(1961, 3, 6), "Ray McCallum")])
     players = ours((10, "Ray McCallum", None)).assign(first_season=2014)
     assert match(players, candidates).empty
+
+
+def team_ours(*rows):
+    return pd.DataFrame(rows, columns=["player_id", "player_name", "team"])
+
+
+def team_espn(*rows):
+    return pd.DataFrame(rows, columns=["espn_player_id", "name", "team"])
+
+
+def test_a_shared_name_is_settled_by_team():
+    from ingest.projections.people import match_by_team
+
+    espn = team_espn((4431776, "Jaylin Williams", None), (4432823, "Jaylin Williams", "OKC"))
+    out = match_by_team(team_ours((1, "Jaylin Williams", "OKC")), espn)
+    assert out.to_dict("records") == [{"player_id": 1, "espn_player_id": 4432823}]
+
+
+def test_a_longer_espn_name_on_the_same_team_matches():
+    from ingest.projections.people import match_by_team
+
+    espn = team_espn((4713010, "David Jones Garcia", "SAS"), (9, "Tre Jones", "SAS"))
+    out = match_by_team(team_ours((1, "David Jones", "SAS")), espn)
+    assert out.to_dict("records") == [{"player_id": 1, "espn_player_id": 4713010}]
+
+
+def test_team_matching_never_guesses():
+    from ingest.projections.people import match_by_team
+
+    two_fit = team_espn((1, "Chris Smith", "LAL"), (2, "Christian Smith", "LAL"))
+    assert match_by_team(team_ours((10, "C. Smith", "LAL")), two_fit).empty
+    other_team = team_espn((1, "David Jones Garcia", "UTA"))
+    assert match_by_team(team_ours((10, "David Jones", "SAS")), other_team).empty
+    no_team = team_espn((1, "David Jones Garcia", "SAS"))
+    assert match_by_team(team_ours((10, "David Jones", None)), no_team).empty
+    shared = team_espn((1, "Jalen Smith", "CHI"))
+    assert match_by_team(team_ours((10, "Jalen Smith", "CHI"), (11, "Jalen Smith", "CHI")),
+                         shared).empty  # fmt: skip
+
+
+def test_espn_team_codes_become_balldontlies():
+    from ingest.projections.people import espn_team
+
+    assert (espn_team(25), espn_team(20), espn_team(21), espn_team(0)) == (
+        "OKC",
+        "PHI",
+        "PHX",
+        None,
+    )

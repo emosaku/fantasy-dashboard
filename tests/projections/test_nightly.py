@@ -132,3 +132,18 @@ def test_the_days_injury_list_is_kept_with_its_date():
         "player_id": 1, "status": "OUT", "source_status": "Out",
         "return_date": dt.date(2026, 11, 4), "snapshot_date": dt.date(2026, 10, 29),
     }]  # fmt: skip
+
+
+def test_links_fall_back_to_team_for_the_rest():
+    players = pd.DataFrame(
+        [(1, "Cooper Flagg", 2025, "DAL"), (2, "Jaylin Williams", 2022, "OKC"),
+         (3, "David Jones", None, "SAS")],
+        columns=["player_id", "player_name", "draft_year", "team"],
+    )  # fmt: skip
+    espn = pd.DataFrame(
+        [(5100, "Cooper Flagg", "DAL"), (4431776, "Jaylin Williams", None),
+         (4432823, "Jaylin Williams", "OKC"), (4713010, "David Jones Garcia", "SAS")],
+        columns=["espn_player_id", "name", "team"],
+    )  # fmt: skip
+    got = dict(links(players, espn).itertuples(index=False))
+    assert got == {1: 5100, 2: 4432823, 3: 4713010}
