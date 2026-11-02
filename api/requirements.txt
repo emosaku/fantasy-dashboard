@@ -1,0 +1,7 @@
+# The API's own packages, on top of the repo's requirements.txt (pandas, BigQuery,
+# Firestore, espn-api ... that the shared app/ and ingest/ code needs). Pinned like
+# requirements.txt; tests run on these versions.
+fastapi==0.161.1
+starlette==1.7.0
+uvicorn==0.54.0
+PyJWT[crypto]==2.10.1

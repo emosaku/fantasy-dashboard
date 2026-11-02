@@ -57,6 +57,8 @@ moving the launch.
 
 ## Phase 1: API foundation (November, 1-2 weekends)
 
+**Built November 1** ([phase1-api.md](phase1-api.md)): every item below done; the new SQL is waiting for review before it runs on `league-lab-whop`.
+
 A FastAPI layer over the existing queries and analysis code, a cache for the trade
 finder, a history view over the snapshots, and two spikes. No UI. The data model is
 already multi-league (every table has `league_id`; the ingest loops over the Firestore
@@ -77,12 +79,12 @@ Show me any new BigQuery SQL before running it against league-lab-whop. Start in
 plan mode.
 ```
 
-- [ ] Every endpoint has a test; median response under 200 ms from the m_* tables and the finder cache
-- [ ] A request for a league the user doesn't belong to returns 403
-- [ ] The daily ingest and the nightly NBA update still run green
-- [ ] The history view returns week-over-week rank changes from the snapshots
-- [ ] Spike written up: can Whop's sign-in act as an OpenID Connect provider for both Streamlit and the API (decides R9)
-- [ ] Spike written up: can a bookmarklet read espn_s2 and SWID, or which fallback for private leagues (research only; private leagues need the lawyer first)
+- [x] Every endpoint has a test; median response under 200 ms from the m_* tables and the finder cache
+- [x] A request for a league the user doesn't belong to returns 403
+- [x] The daily ingest and the nightly NBA update still run green
+- [x] The history view returns week-over-week rank changes from the snapshots
+- [x] Spike written up: can Whop's sign-in act as an OpenID Connect provider for both Streamlit and the API (decides R9)
+- [x] Spike written up: can a bookmarklet read espn_s2 and SWID, or which fallback for private leagues (research only; private leagues need the lawyer first)
 
 ## Phase 2: scaffold and sign-in (December, 1 weekend)
 

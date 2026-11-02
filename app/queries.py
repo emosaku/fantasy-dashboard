@@ -14,6 +14,7 @@ import pandas as pd
 import streamlit as st
 from google.cloud import bigquery
 
+import reads
 import settings
 
 
@@ -24,19 +25,7 @@ def _client() -> bigquery.Client:
 
 @st.cache_data(ttl=6 * 3600, max_entries=400, show_spinner="Loading league data...")
 def _read(table: str, league_id: int, version: str) -> pd.DataFrame:
-    sql = (
-        f"SELECT * FROM `{settings.PROJECT}.{settings.DATASET}.{table}` "
-        "WHERE league_id = @league_id"
-    )
-    config = bigquery.QueryJobConfig(
-        query_parameters=[bigquery.ScalarQueryParameter("league_id", "INT64", int(league_id))]
-    )
-    df = _client().query(sql, job_config=config).to_dataframe(create_bqstorage_client=False)
-    # ESPN keeps whatever spacing a manager typed, trailing spaces included.
-    for col in ("team_name", "opponent_name", "player_name"):
-        if col in df:
-            df[col] = df[col].str.strip()
-    return df
+    return reads.league_rows(_client(), settings.PROJECT, settings.DATASET, table, league_id)
 
 
 def team_week_cats(league_id: int, version: str) -> pd.DataFrame:
